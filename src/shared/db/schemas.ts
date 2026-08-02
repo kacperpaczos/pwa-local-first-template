@@ -25,7 +25,7 @@ export const updateNoteInputSchema = z.object({
 
 export type UpdateNoteInput = z.infer<typeof updateNoteInputSchema>;
 
-/** Boundary validation for future sync payloads (Faza 2). */
+/** @deprecated use syncMutationSchema from shared/sync/protocol */
 export const syncMutationMessageSchema = z.object({
   idempotencyKey: z.string(),
   entity: z.literal("notes"),

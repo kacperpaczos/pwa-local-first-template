@@ -3,6 +3,7 @@ import { createResource } from "solid-js";
 import { PersistenceUnavailableError } from "@tanstack/db-sqlite-persistence-core";
 import { openAppDatabase, type AppDatabase } from "./client";
 import { createPersistenceFacade, type PersistenceFacade } from "./facade";
+import { setSyncStatus } from "@/shared/sync/status";
 
 type DbContextValue = {
   db: AppDatabase;
@@ -16,6 +17,12 @@ export const DbProvider: ParentComponent = (props) => {
     const db = await openAppDatabase();
     await db.offline.waitForInit();
     await db.notes.preload();
+    await db.syncMeta.preload();
+    void db.pullRemote().catch(() => {
+      setSyncStatus(
+        typeof navigator !== "undefined" && !navigator.onLine ? "offline" : "idle",
+      );
+    });
     const facade = createPersistenceFacade(db);
     if (import.meta.env.DEV) {
       (globalThis as unknown as { __db?: unknown }).__db = { db, facade };

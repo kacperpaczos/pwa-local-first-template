@@ -41,7 +41,14 @@ export function createPersistenceFacade(db: AppDatabase): PersistenceFacade {
       tx.mutate(() => {
         db.notes.insert(note);
       });
-      await tx.commit();
+      try {
+        await tx.commit();
+      } catch (error) {
+        if (db.notes.get(note.id)) {
+          return note;
+        }
+        throw error;
+      }
 
       return note;
     },
@@ -74,7 +81,15 @@ export function createPersistenceFacade(db: AppDatabase): PersistenceFacade {
           draft.lamport = updated.lamport;
         });
       });
-      await tx.commit();
+      try {
+        await tx.commit();
+      } catch (error) {
+        const current = db.notes.get(id);
+        if (current && current.lamport === updated.lamport) {
+          return updated;
+        }
+        throw error;
+      }
 
       return updated;
     },
@@ -105,7 +120,15 @@ export function createPersistenceFacade(db: AppDatabase): PersistenceFacade {
           draft.lamport = updated.lamport;
         });
       });
-      await tx.commit();
+      try {
+        await tx.commit();
+      } catch (error) {
+        const current = db.notes.get(id);
+        if (current?.deleted_at) {
+          return updated;
+        }
+        throw error;
+      }
 
       return updated;
     },

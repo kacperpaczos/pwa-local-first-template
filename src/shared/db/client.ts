@@ -9,18 +9,28 @@ import { startOfflineExecutor } from "@tanstack/offline-transactions";
 import type { Collection } from "@tanstack/db";
 import type { OfflineExecutor } from "@tanstack/offline-transactions";
 import type { Note } from "./schemas";
-import { NoopSyncTransport } from "@/shared/sync/noop-transport";
+import type { SyncMeta } from "./sync-meta";
 import { SyncMutex, runSyncCycle } from "@/shared/sync/mutex";
 import type { SyncMutation, SyncTransport } from "@/shared/sync/transport";
+import { createSyncTransport } from "@/shared/sync/ws-transport";
+import {
+  applyRemoteMutations,
+  readRelayCursor,
+  withSyncStatus,
+  writeRelayCursor,
+} from "@/shared/sync/apply-remote";
+import { setSyncStatus } from "@/shared/sync/status";
 
 const DB_FILE = "pwa-local-first.sqlite";
 const DB_NAME = "pwa-local-first";
 
 export type AppDatabase = {
   notes: Collection<Note, string>;
+  syncMeta: Collection<SyncMeta, string>;
   offline: OfflineExecutor;
   transport: SyncTransport;
   syncMutex: SyncMutex;
+  pullRemote: () => Promise<void>;
   close: () => Promise<void>;
 };
 
@@ -70,30 +80,83 @@ export async function openAppDatabase(): Promise<AppDatabase> {
     }),
   );
 
-  const transport: SyncTransport = new NoopSyncTransport();
+  const syncMeta = createCollection(
+    persistedCollectionOptions<SyncMeta, string>({
+      id: "sync_meta",
+      getKey: (row) => row.id,
+      persistence,
+      schemaVersion: 1,
+    }),
+  );
+
+  const transport = createSyncTransport();
   const syncMutex = new SyncMutex();
 
+  const pullRemote = async () => {
+    await withSyncStatus(async () => {
+      await syncMutex.runExclusive(async () => {
+        const cursor = readRelayCursor(syncMeta);
+        const pull = await transport.pull(cursor);
+        await applyRemoteMutations({ notes, syncMeta }, pull.mutations);
+        if (pull.cursor !== cursor) {
+          await writeRelayCursor(syncMeta, pull.cursor);
+        }
+      });
+    });
+  };
+
   const offline = startOfflineExecutor({
-    collections: { notes },
+    collections: { notes, syncMeta },
     mutationFns: {
       syncNotes: async ({ transaction, idempotencyKey }) => {
-        // Persist optimistic mutations into SQLite (required for local-only / persisted collections).
         notes.utils.acceptMutations(transaction);
-        await runSyncCycle(transport, syncMutex, {
-          cursor: null,
-          outbox: mutationsFromTransaction(idempotencyKey, transaction.mutations),
+
+        await withSyncStatus(async () => {
+          try {
+            const cursor = readRelayCursor(syncMeta);
+            const { pull } = await runSyncCycle(transport, syncMutex, {
+              cursor,
+              outbox: mutationsFromTransaction(idempotencyKey, transaction.mutations),
+            });
+            await applyRemoteMutations({ notes, syncMeta }, pull.mutations);
+            if (pull.cursor !== cursor) {
+              await writeRelayCursor(syncMeta, pull.cursor);
+            }
+          } catch (error) {
+            setSyncStatus(
+              typeof navigator !== "undefined" && !navigator.onLine ? "offline" : "idle",
+            );
+            throw error;
+          }
         });
       },
     },
   });
 
+  const onOnline = () => {
+    void pullRemote().catch(() => {
+      /* outbox retries separately */
+    });
+  };
+  if (typeof window !== "undefined") {
+    window.addEventListener("online", onOnline);
+  }
+
   return {
     notes,
+    syncMeta,
     offline,
     transport,
     syncMutex,
+    pullRemote,
     close: async () => {
+      if (typeof window !== "undefined") {
+        window.removeEventListener("online", onOnline);
+      }
       offline.dispose();
+      if ("close" in transport && typeof transport.close === "function") {
+        await transport.close();
+      }
       coordinator.dispose();
       await database.close?.();
     },
