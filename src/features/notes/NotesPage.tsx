@@ -68,6 +68,20 @@ const NotesPage: Component = () => {
       <p class={styles.status} data-testid="sync-status">
         Sync: {syncStatus()} · filtr: {filter()}
       </p>
+      <div class={styles.actions} style={{ "margin-bottom": "1rem" }}>
+        <button
+          type="button"
+          class={styles.buttonGhost}
+          data-testid="sync-now"
+          onClick={() => {
+            void db.pullRemote().catch((error) => {
+              setNotesFormError(error instanceof Error ? error.message : String(error));
+            });
+          }}
+        >
+          Synchronizuj
+        </button>
+      </div>
 
       <form class={styles.form} onSubmit={onSubmit}>
         <input
