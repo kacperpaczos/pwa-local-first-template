@@ -1,0 +1,43 @@
+@import "./tokens.css";
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+  font-family: var(--font-body);
+  font-size: 1rem;
+  line-height: 1.5;
+  color: var(--color-fg);
+  background:
+    radial-gradient(ellipse 80% 50% at 50% -20%, #1a3a5c 0%, transparent 55%),
+    var(--color-bg);
+}
+
+#root {
+  min-height: 100dvh;
+}
+
+a {
+  color: var(--color-accent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.15em;
+  transition: color var(--ease);
+}
+
+a:hover {
+  color: var(--color-accent-hover);
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+}
