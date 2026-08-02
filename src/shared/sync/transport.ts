@@ -21,8 +21,8 @@ export type Conflict = {
 };
 
 /**
- * Swappable sync adapter for Faza 2.
- * First implementation is NoopSyncTransport (local-only).
+ * Swappable sync adapter.
+ * Phase 2 default: WsSyncTransport (relay). Fallback: NoopSyncTransport.
  */
 export interface SyncTransport {
   push(outbox: readonly SyncMutation[]): Promise<PushResult>;
