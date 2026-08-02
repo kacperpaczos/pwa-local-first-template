@@ -33,3 +33,26 @@ test("notes CRUD soft-delete flow", async ({ page }) => {
   await expect(primary).toHaveCount(0);
   await expect(page.getByTestId("notes-list")).toContainText(offlineTitle);
 });
+
+test("two peers sync a note through the websocket relay", async ({ browser }) => {
+  const contextA = await browser.newContext();
+  const contextB = await browser.newContext();
+  const pageA = await contextA.newPage();
+  const pageB = await contextB.newPage();
+
+  await pageA.goto("/notes");
+  await pageB.goto("/notes");
+  await expect(pageA.getByTestId("sync-status")).toBeVisible({ timeout: 30_000 });
+  await expect(pageB.getByTestId("sync-status")).toBeVisible({ timeout: 30_000 });
+
+  const title = `Relay note ${Date.now()}`;
+  await pageA.getByTestId("note-title").fill(title);
+  await pageA.getByTestId("note-submit").click();
+  await expect(pageA.getByTestId("notes-list")).toContainText(title);
+
+  await pageB.getByTestId("sync-now").click();
+  await expect(pageB.getByTestId("notes-list")).toContainText(title, { timeout: 15_000 });
+
+  await contextA.close();
+  await contextB.close();
+});

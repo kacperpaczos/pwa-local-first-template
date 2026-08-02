@@ -10,10 +10,11 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   webServer: {
-    command: "pnpm build && pnpm preview --host 127.0.0.1 --port 4173",
+    command:
+      "VITE_SYNC_WS_URL=ws://127.0.0.1:8787 pnpm build && pnpm exec concurrently -k -s first -n relay,web \"pnpm dev:relay\" \"pnpm preview --host 127.0.0.1 --port 4173\"",
     url: "http://127.0.0.1:4173",
-    reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
+    reuseExistingServer: false,
+    timeout: 180_000,
   },
   projects: [
     {
