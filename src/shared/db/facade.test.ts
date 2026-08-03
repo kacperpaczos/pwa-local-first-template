@@ -4,6 +4,12 @@ import type { AppDatabase } from "./client";
 import type { Note } from "./schemas";
 import { resetLamportForTests } from "./lamport";
 
+/**
+ * `createFakeDb()` below hand-rolls a Map-backed collection + offline
+ * executor stand-in — no real TanStack DB or OPFS SQLite runs in this file.
+ * This verifies PersistenceFacade's own outbox/lamport wiring, not the real
+ * persistence engine — that's only exercised for real in e2e.
+ */
 function createFakeDb(options: { syncThrows?: boolean } = {}) {
   const map = new Map<string, Note>();
 

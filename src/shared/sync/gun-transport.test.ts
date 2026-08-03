@@ -1,3 +1,12 @@
+/**
+ * `createFakeGun()` below is a hand-rolled in-memory graph (Map + listener
+ * set) injected via GunSyncTransport's `createGun` option — no real `Gun()`
+ * instance, no real networking or HAM conflict resolution runs in this file.
+ * SEA encrypt/decrypt IS real (`import SEA from "gun/sea"`), so failures like
+ * "Could not decrypt" reflect a genuine failed decrypt, not a fake result.
+ * Real Gun networking is only exercised in e2e: `e2e/gun-peers.spec.ts`,
+ * `e2e/offline-sync.spec.ts`, `e2e/multi-tab.spec.ts`.
+ */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import SEA from "gun/sea";
 import { GunSyncTransport, parseGunPeers } from "./gun-transport";

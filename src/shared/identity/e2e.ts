@@ -11,8 +11,15 @@ type IdentityE2eHooks = {
 };
 
 /**
- * Playwright harness: import/export SEA pair without camera QR.
+ * DEV-console tooling to import/export a SEA pair without camera QR.
  * Only registered when DEV or VITE_E2E=1.
+ *
+ * Note: the automated Playwright suite does NOT call these — it seeds
+ * `localStorage` directly via `addInitScript` in `e2e/helpers.ts` before the
+ * app's first navigation, since these hooks are only available post-mount
+ * and can't seed the space key alongside the pair. Kept for manual
+ * debugging (open devtools console, call `__exportIdentity()`/
+ * `__importIdentity(...)`).
  */
 export function exposeIdentityE2eHooks(): void {
   if (!(import.meta.env.DEV || import.meta.env.VITE_E2E === "1")) {
