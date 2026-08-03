@@ -1,8 +1,8 @@
 import { expect, test } from "@playwright/test";
-import { createNote, resetRelay, uniqueTitle, waitForNoteSynced, waitForNotesReady } from "./helpers";
+import { createNote, resetGunPeer, uniqueTitle, waitForNoteSynced, waitForNotesReady } from "./helpers";
 
 test.beforeEach(async () => {
-  await resetRelay();
+  await resetGunPeer();
 });
 
 test("export on one device, import on a fresh device, data (incl. tombstones) matches", async ({

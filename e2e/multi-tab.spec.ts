@@ -4,8 +4,13 @@ import {
   expectNoteHidden,
   expectNoteVisible,
   openTwoTabs,
+  resetRelay,
   uniqueTitle,
 } from "./helpers";
+
+test.beforeEach(async () => {
+  await resetRelay();
+});
 
 test("two tabs on the same origin share one OPFS database via the coordinator", async ({
   browser,
