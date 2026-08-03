@@ -12,6 +12,8 @@ export {
   summarizeWithAi,
   getAiProvider,
   resetAiSessionForTests,
+  aiHarnessEnabled,
+  shouldUseAiHarness,
 } from "./session";
 
 /**

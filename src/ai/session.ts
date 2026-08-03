@@ -13,14 +13,28 @@ export type AiProviderFactory = () => AiProvider | Promise<AiProvider>;
 
 declare global {
   // E2E / tests: inject a fake provider instead of downloading a real model.
+  // Honoured only when `aiHarnessEnabled()` is true (DEV / VITE_E2E / Vitest).
   var __createAiProvider: AiProviderFactory | undefined;
 }
 
 let provider: AiProvider | null = null;
 let downloadInFlight: Promise<void> | null = null;
 
+/** Harness injection is never active in production builds. */
+export function shouldUseAiHarness(env: {
+  DEV?: boolean;
+  VITE_E2E?: string;
+  MODE?: string;
+}): boolean {
+  return env.DEV === true || env.VITE_E2E === "1" || env.MODE === "test";
+}
+
+export function aiHarnessEnabled(): boolean {
+  return shouldUseAiHarness(import.meta.env);
+}
+
 function resolveFactory(): AiProviderFactory {
-  if (typeof globalThis.__createAiProvider === "function") {
+  if (aiHarnessEnabled() && typeof globalThis.__createAiProvider === "function") {
     return globalThis.__createAiProvider;
   }
   return async () => {
