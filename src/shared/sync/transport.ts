@@ -1,6 +1,6 @@
 export type SyncMutation = {
   idempotencyKey: string;
-  entity: "notes";
+  entity: string;
   op: "upsert" | "soft_delete";
   payload: unknown;
 };
