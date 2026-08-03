@@ -22,7 +22,7 @@ export type Conflict = {
 
 /**
  * Swappable sync adapter.
- * Phase 2 default: WsSyncTransport (relay). Fallback: NoopSyncTransport.
+ * Default: GunSyncTransport (SEA-signed mesh). Fallback: NoopSyncTransport.
  */
 export interface SyncTransport {
   push(outbox: readonly SyncMutation[]): Promise<PushResult>;

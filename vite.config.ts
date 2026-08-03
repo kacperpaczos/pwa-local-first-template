@@ -3,9 +3,23 @@ import solidPlugin from "vite-plugin-solid";
 import { VitePWA } from "vite-plugin-pwa";
 import { fileURLToPath, URL } from "node:url";
 
+const moduleExclude = (match: string) => {
+  const m = (id: string) => id.includes(match);
+  return {
+    name: `exclude-${match}`,
+    resolveId(id: string) {
+      if (m(id)) return id;
+    },
+    load(id: string) {
+      if (m(id)) return `export default {}`;
+    },
+  };
+};
+
 export default defineConfig({
   plugins: [
     solidPlugin(),
+    moduleExclude("text-encoding"),
     VitePWA({
       registerType: "autoUpdate",
       includeAssets: ["favicon.svg"],
@@ -56,6 +70,19 @@ export default defineConfig({
       },
     }),
   ],
+  optimizeDeps: {
+    include: [
+      "gun",
+      "gun/gun",
+      "gun/sea",
+      "gun/sea.js",
+      "gun/lib/webrtc",
+      "gun/lib/radix",
+      "gun/lib/radisk",
+      "gun/lib/store",
+      "gun/lib/rindexed",
+    ],
+  },
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
@@ -66,5 +93,8 @@ export default defineConfig({
   },
   build: {
     target: "esnext",
+    commonjsOptions: {
+      include: [/gun/, /node_modules/],
+    },
   },
 });

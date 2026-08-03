@@ -2,7 +2,8 @@
 /// <reference types="vite-plugin-pwa/client" />
 
 interface ImportMetaEnv {
-  readonly VITE_SYNC_WS_URL?: string;
+  /** Comma-separated Gun peer URLs. Empty → NoopSyncTransport. */
+  readonly VITE_GUN_PEERS?: string;
   /** Master AI feature flag; set to "false" to hide the whole ai/ layer. */
   readonly VITE_AI_ENABLED?: string;
   /** When "1", expose globalThis.__db for Playwright e2e (non-production tooling). */
