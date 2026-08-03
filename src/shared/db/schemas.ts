@@ -3,10 +3,14 @@ import * as z from "zod/mini";
 export const noteSchema = z.object({
   id: z.string(),
   title: z.string(),
+  title_lamport: z.number(),
+  /** Plain-text projection of `body_doc`, kept in sync for fast reads/filtering. */
   body: z.string(),
+  /** Base64-encoded Loro CRDT snapshot — source of truth for `body`. */
+  body_doc: z.string(),
   updated_at: z.string(),
   deleted_at: z.nullable(z.string()),
-  lamport: z.number(),
+  deleted_lamport: z.number(),
 });
 
 export type Note = z.infer<typeof noteSchema>;
@@ -24,16 +28,6 @@ export const updateNoteInputSchema = z.object({
 });
 
 export type UpdateNoteInput = z.infer<typeof updateNoteInputSchema>;
-
-/** @deprecated use syncMutationSchema from shared/sync/protocol */
-export const syncMutationMessageSchema = z.object({
-  idempotencyKey: z.string(),
-  entity: z.literal("notes"),
-  op: z.enum(["upsert", "soft_delete"]),
-  payload: noteSchema,
-});
-
-export type SyncMutationMessage = z.infer<typeof syncMutationMessageSchema>;
 
 export function parseNote(data: unknown): Note {
   return noteSchema.parse(data);

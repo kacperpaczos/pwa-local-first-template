@@ -76,7 +76,7 @@ export async function openAppDatabase(): Promise<AppDatabase> {
       id: "notes",
       getKey: (note) => note.id,
       persistence,
-      schemaVersion: 1,
+      schemaVersion: 2,
     }),
   );
 
@@ -85,7 +85,12 @@ export async function openAppDatabase(): Promise<AppDatabase> {
       id: "sync_meta",
       getKey: (row) => row.id,
       persistence,
-      schemaVersion: 1,
+      // Must match `notes`' schemaVersion: @tanstack/browser-db-sqlite-persistence
+      // caches one adapter per (mode, schemaVersion) and re-registers it with the
+      // BrowserCollectionCoordinator on every collection setup. Collections sharing
+      // a coordinator with *different* schemaVersion values clobber each other's
+      // active adapter, breaking the other collection's schema-mismatch check.
+      schemaVersion: 2,
     }),
   );
 

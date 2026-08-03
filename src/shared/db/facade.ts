@@ -1,4 +1,5 @@
 import type { AppDatabase } from "./client";
+import { createBodyDoc, updateBodyDoc } from "./crdt";
 import { createEntityId } from "./ids";
 import { nextLamport } from "./lamport";
 import {
@@ -24,13 +25,16 @@ export function createPersistenceFacade(db: AppDatabase): PersistenceFacade {
     async createNote(rawInput) {
       const input = parseCreateNoteInput(rawInput);
       const now = new Date().toISOString();
+      const body = createBodyDoc(input.body?.trim() ?? "");
       const note: Note = {
         id: createEntityId(),
         title: input.title.trim(),
-        body: input.body?.trim() ?? "",
+        title_lamport: nextLamport(),
+        body: body.text,
+        body_doc: body.doc,
         updated_at: now,
         deleted_at: null,
-        lamport: nextLamport(),
+        deleted_lamport: 0,
       };
 
       const tx = db.offline.createOfflineTransaction({
@@ -60,12 +64,19 @@ export function createPersistenceFacade(db: AppDatabase): PersistenceFacade {
         throw new Error(`Note not found: ${id}`);
       }
 
+      const titleChanged = input.title !== undefined && input.title.trim() !== existing.title;
+      const body =
+        input.body !== undefined && input.body !== existing.body
+          ? updateBodyDoc(existing.body_doc, input.body)
+          : { text: existing.body, doc: existing.body_doc };
+
       const updated: Note = {
         ...existing,
         title: input.title?.trim() ?? existing.title,
-        body: input.body ?? existing.body,
+        title_lamport: titleChanged ? nextLamport(existing.title_lamport) : existing.title_lamport,
+        body: body.text,
+        body_doc: body.doc,
         updated_at: new Date().toISOString(),
-        lamport: nextLamport(existing.lamport),
       };
 
       const tx = db.offline.createOfflineTransaction({
@@ -76,16 +87,17 @@ export function createPersistenceFacade(db: AppDatabase): PersistenceFacade {
       tx.mutate(() => {
         db.notes.update(id, (draft) => {
           draft.title = updated.title;
+          draft.title_lamport = updated.title_lamport;
           draft.body = updated.body;
+          draft.body_doc = updated.body_doc;
           draft.updated_at = updated.updated_at;
-          draft.lamport = updated.lamport;
         });
       });
       try {
         await tx.commit();
       } catch (error) {
         const current = db.notes.get(id);
-        if (current && current.lamport === updated.lamport) {
+        if (current && current.title_lamport === updated.title_lamport && current.body === updated.body) {
           return updated;
         }
         throw error;
@@ -105,7 +117,7 @@ export function createPersistenceFacade(db: AppDatabase): PersistenceFacade {
         ...existing,
         deleted_at: now,
         updated_at: now,
-        lamport: nextLamport(existing.lamport),
+        deleted_lamport: nextLamport(existing.deleted_lamport),
       };
 
       const tx = db.offline.createOfflineTransaction({
@@ -117,7 +129,7 @@ export function createPersistenceFacade(db: AppDatabase): PersistenceFacade {
         db.notes.update(id, (draft) => {
           draft.deleted_at = updated.deleted_at;
           draft.updated_at = updated.updated_at;
-          draft.lamport = updated.lamport;
+          draft.deleted_lamport = updated.deleted_lamport;
         });
       });
       try {
