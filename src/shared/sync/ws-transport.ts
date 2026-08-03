@@ -11,6 +11,13 @@ function createRequestId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+export type WsSyncTransportOptions = {
+  /** Inject a WebSocket constructor/factory (tests). Defaults to global WebSocket. */
+  createSocket?: (url: string) => WebSocket;
+  /** Per-request timeout in ms (tests can shorten). Default 10_000. */
+  requestTimeoutMs?: number;
+};
+
 /**
  * Browser WebSocket transport talking to the Phase 2 relay.
  */
@@ -24,8 +31,16 @@ export class WsSyncTransport implements SyncTransport {
       reject: (error: Error) => void;
     }
   >();
+  private readonly createSocket: (url: string) => WebSocket;
+  private readonly requestTimeoutMs: number;
 
-  constructor(private readonly url: string) {}
+  constructor(
+    private readonly url: string,
+    options: WsSyncTransportOptions = {},
+  ) {
+    this.createSocket = options.createSocket ?? ((u) => new WebSocket(u));
+    this.requestTimeoutMs = options.requestTimeoutMs ?? 10_000;
+  }
 
   async push(outbox: readonly SyncMutation[]): Promise<PushResult> {
     if (outbox.length === 0) {
@@ -87,7 +102,7 @@ export class WsSyncTransport implements SyncTransport {
 
     if (!this.connecting) {
       this.connecting = new Promise<void>((resolve, reject) => {
-        const socket = new WebSocket(this.url);
+        const socket = this.createSocket(this.url);
         this.socket = socket;
 
         const onOpen = () => {
@@ -154,7 +169,7 @@ export class WsSyncTransport implements SyncTransport {
       const timeout = setTimeout(() => {
         this.pending.delete(requestId);
         reject(new Error(`Sync relay timeout for ${message.type}`));
-      }, 10_000);
+      }, this.requestTimeoutMs);
 
       this.pending.set(requestId, {
         resolve: (value) => {

@@ -24,7 +24,8 @@ export const DbProvider: ParentComponent = (props) => {
       );
     });
     const facade = createPersistenceFacade(db);
-    if (import.meta.env.DEV) {
+    // Expose for DEV tooling and Playwright e2e (VITE_E2E=1 in the e2e build).
+    if (import.meta.env.DEV || import.meta.env.VITE_E2E === "1") {
       (globalThis as unknown as { __db?: unknown }).__db = { db, facade };
     }
     return {
