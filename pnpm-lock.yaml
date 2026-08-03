@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@mlc-ai/web-llm':
+        specifier: ^0.2.84
+        version: 0.2.84
       '@nanostores/solid':
         specifier: ^1.1.1
         version: 1.1.1(nanostores@1.4.2)(solid-js@1.9.9)
@@ -923,6 +926,9 @@ packages:
 
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
+
+  '@mlc-ai/web-llm@0.2.84':
+    resolution: {integrity: sha512-hrOWzK4/nGNmgoRKT8pgVmZZ2oEPpbblIWQOwpqNyvK2dysHw3KVB1gNJOuRcQfKOPhucEhX1NJzXzgMDnwSCQ==}
 
   '@nanostores/solid@1.1.1':
     resolution: {integrity: sha512-gF0Eat1/c3hOaklBMSVoEjcNzJc5zGk4VSg94H9LPmXYww1pxgr7zylpi3jjyxRu24c8+aYNkmRWzolAwzSA1A==}
@@ -2069,6 +2075,10 @@ packages:
 
   lodash.debounce@4.0.8:
     resolution: {integrity: sha512-FT1yDzDYEoYWhnSGnpE/4Kj1fLZkDFyqRb7fNt6FdYOSxlUWAtp42Eh6Wb0rGIv/m9Bgo7x4GhQbm5Ys4SG5ow==}
+
+  loglevel@1.9.2:
+    resolution: {integrity: sha512-HgMmCqIJSAKqo68l0rS2AanEWfkxaZ5wNiEFb5ggm08lDs9Xl2KxBlX3PTcaD2chBM1gXAYf491/M2Rv8Jwayg==}
+    engines: {node: '>= 0.6.0'}
 
   loro-crdt@1.13.9:
     resolution: {integrity: sha512-gZYkMy1mqP1wzZqhQ69rNQowOuohLPcLbVQ+MjeJh3dbiXR+XJnbbP1GMxkJ0uBNbRbGmR2w+LazSDQImIJDrw==}
@@ -3758,6 +3768,10 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
 
+  '@mlc-ai/web-llm@0.2.84':
+    dependencies:
+      loglevel: 1.9.2
+
   '@nanostores/solid@1.1.1(nanostores@1.4.2)(solid-js@1.9.9)':
     dependencies:
       nanostores: 1.4.2
@@ -4899,6 +4913,8 @@ snapshots:
       lightningcss-win32-x64-msvc: 1.33.0
 
   lodash.debounce@4.0.8: {}
+
+  loglevel@1.9.2: {}
 
   loro-crdt@1.13.9: {}
 
