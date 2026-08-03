@@ -3,6 +3,12 @@ import type { Note } from "../db/schemas";
 import { createBodyDoc } from "../db/crdt";
 import { TOMBSTONE_RETENTION_MS, gcTombstones } from "./gc";
 
+/**
+ * `@tanstack/db` is fully mocked below (transactions become a trivial
+ * mutate-then-resolve, no real collection/persistence engine runs). This
+ * file verifies gcTombstones' own retention/threshold logic, not TanStack
+ * DB or OPFS SQLite — those are only exercised for real in e2e.
+ */
 vi.mock("@tanstack/db", () => ({
   createTransaction: ({
     mutationFn,

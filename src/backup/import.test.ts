@@ -4,6 +4,12 @@ import { createBodyDoc } from "../shared/db/crdt";
 import { createEntityId } from "../shared/db/ids";
 import { resetLamportForTests } from "../shared/db/lamport";
 
+/**
+ * `@tanstack/db` is fully mocked below (transactions become a trivial
+ * mutate-then-resolve, no real collection/persistence engine runs). This
+ * file verifies the import/merge logic itself, not TanStack DB or OPFS
+ * SQLite — those are only exercised for real in e2e (`e2e/backup.spec.ts`).
+ */
 vi.mock("@tanstack/db", () => ({
   createTransaction: ({
     mutationFn,
