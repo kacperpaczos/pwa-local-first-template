@@ -54,6 +54,28 @@ describe("mergeNote — deleted_at (per-field LWW)", () => {
     const merged = mergeNote(local, remote);
     expect(merged.deleted_at).toBe("2026-01-01T00:00:00.000Z");
   });
+
+  it("keeps title and deleted_at independent under concurrent edits", () => {
+    const local = note({
+      id: "1",
+      title: "new title",
+      title_lamport: 5,
+      deleted_at: null,
+      deleted_lamport: 1,
+    });
+    const remote = note({
+      id: "1",
+      title: "old title",
+      title_lamport: 1,
+      deleted_at: "2026-01-01T00:00:00.000Z",
+      deleted_lamport: 4,
+    });
+    const merged = mergeNote(local, remote);
+    expect(merged.title).toBe("new title");
+    expect(merged.deleted_at).toBe("2026-01-01T00:00:00.000Z");
+    expect(merged.title_lamport).toBe(5);
+    expect(merged.deleted_lamport).toBe(4);
+  });
 });
 
 describe("mergeNote — body (CRDT merge, not LWW)", () => {
@@ -82,5 +104,31 @@ describe("mergeNote — body (CRDT merge, not LWW)", () => {
     const noteB = note({ id: "1", body: b.text, body_doc: b.doc });
 
     expect(mergeNote(noteA, noteB).body).toBe(mergeNote(noteB, noteA).body);
+  });
+
+  it("updates body_doc after a CRDT merge and uses max clocks", () => {
+    const base = createBodyDoc("Hello world");
+    const localEdit = updateBodyDoc(base.doc, "Hello brave world");
+    const remoteEdit = updateBodyDoc(base.doc, "Hello world!");
+    const local = note({
+      id: "1",
+      body: localEdit.text,
+      body_doc: localEdit.doc,
+      title_lamport: 2,
+      deleted_lamport: 3,
+    });
+    const remote = note({
+      id: "1",
+      body: remoteEdit.text,
+      body_doc: remoteEdit.doc,
+      title_lamport: 5,
+      deleted_lamport: 1,
+    });
+    const merged = mergeNote(local, remote);
+    expect(merged.body).toBe("Hello brave world!");
+    expect(merged.body_doc).not.toBe(local.body_doc);
+    expect(merged.body_doc).not.toBe(remote.body_doc);
+    expect(merged.title_lamport).toBe(5);
+    expect(merged.deleted_lamport).toBe(3);
   });
 });
