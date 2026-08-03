@@ -6,7 +6,7 @@ import { nextLamport } from "../db/lamport";
 import type { SyncMeta } from "../db/sync-meta";
 import { RELAY_SYNC_META_ID } from "../db/sync-meta";
 import { parseSyncMutation } from "./protocol";
-import { shouldApplyRemote } from "./lww";
+import { mergeNote } from "./merge-note";
 import type { SyncMutation } from "./transport";
 import { setSyncStatus } from "./status";
 
@@ -58,29 +58,40 @@ export async function applyRemoteMutations(
     }
 
     const remote = parseNote(validated.payload);
-    nextLamport(remote.lamport);
+    nextLamport(Math.max(remote.title_lamport, remote.deleted_lamport));
 
     const local = target.notes.get(remote.id);
-
-    if (!shouldApplyRemote(local, remote)) {
-      continue;
-    }
 
     if (!local) {
       await persistLocal(target.notes, () => {
         target.notes.insert(remote);
       });
-    } else {
-      await persistLocal(target.notes, () => {
-        target.notes.update(remote.id, (draft) => {
-          draft.title = remote.title;
-          draft.body = remote.body;
-          draft.updated_at = remote.updated_at;
-          draft.deleted_at = remote.deleted_at;
-          draft.lamport = remote.lamport;
-        });
-      });
+      applied += 1;
+      continue;
     }
+
+    const merged = mergeNote(local, remote);
+    if (
+      merged.title === local.title &&
+      merged.body === local.body &&
+      merged.deleted_at === local.deleted_at &&
+      merged.title_lamport === local.title_lamport &&
+      merged.deleted_lamport === local.deleted_lamport
+    ) {
+      continue;
+    }
+
+    await persistLocal(target.notes, () => {
+      target.notes.update(remote.id, (draft) => {
+        draft.title = merged.title;
+        draft.title_lamport = merged.title_lamport;
+        draft.body = merged.body;
+        draft.body_doc = merged.body_doc;
+        draft.updated_at = merged.updated_at;
+        draft.deleted_at = merged.deleted_at;
+        draft.deleted_lamport = merged.deleted_lamport;
+      });
+    });
     applied += 1;
   }
 
