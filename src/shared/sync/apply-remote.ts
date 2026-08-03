@@ -4,7 +4,7 @@ import type { Note } from "../db/schemas";
 import { parseNote } from "../db/schemas";
 import { nextLamport } from "../db/lamport";
 import type { SyncMeta } from "../db/sync-meta";
-import { RELAY_SYNC_META_ID } from "../db/sync-meta";
+import { SYNC_META_ID } from "../db/sync-meta";
 import { parseSyncMutation } from "./protocol";
 import { mergeNote } from "./merge-note";
 import type { SyncMutation } from "./transport";
@@ -98,21 +98,24 @@ export async function applyRemoteMutations(
   return applied;
 }
 
-export function readRelayCursor(syncMeta: Collection<SyncMeta, string>): string | null {
-  return syncMeta.get(RELAY_SYNC_META_ID)?.cursor ?? null;
+export function readSyncCursor(syncMeta: Collection<SyncMeta, string>): string | null {
+  return syncMeta.get(SYNC_META_ID)?.cursor ?? null;
 }
 
-export async function writeRelayCursor(
+/** @deprecated Use readSyncCursor */
+export const readRelayCursor = readSyncCursor;
+
+export async function writeSyncCursor(
   syncMeta: Collection<SyncMeta, string>,
   cursor: string | null,
 ): Promise<void> {
-  const existing = syncMeta.get(RELAY_SYNC_META_ID);
+  const existing = syncMeta.get(SYNC_META_ID);
   const updated_at = new Date().toISOString();
 
   if (!existing) {
     await persistSyncMeta(syncMeta, () => {
       syncMeta.insert({
-        id: RELAY_SYNC_META_ID,
+        id: SYNC_META_ID,
         cursor,
         updated_at,
       });
@@ -121,12 +124,15 @@ export async function writeRelayCursor(
   }
 
   await persistSyncMeta(syncMeta, () => {
-    syncMeta.update(RELAY_SYNC_META_ID, (draft) => {
+    syncMeta.update(SYNC_META_ID, (draft) => {
       draft.cursor = cursor;
       draft.updated_at = updated_at;
     });
   });
 }
+
+/** @deprecated Use writeSyncCursor */
+export const writeRelayCursor = writeSyncCursor;
 
 export function withSyncStatus<T>(fn: () => Promise<T>): Promise<T> {
   setSyncStatus("syncing");

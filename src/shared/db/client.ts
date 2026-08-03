@@ -12,12 +12,12 @@ import type { Note } from "./schemas";
 import type { SyncMeta } from "./sync-meta";
 import { SyncMutex, runSyncCycle } from "@/shared/sync/mutex";
 import type { SyncMutation, SyncTransport } from "@/shared/sync/transport";
-import { createSyncTransport } from "@/shared/sync/ws-transport";
+import { createSyncTransport } from "@/shared/sync/gun-transport";
 import {
   applyRemoteMutations,
-  readRelayCursor,
+  readSyncCursor,
   withSyncStatus,
-  writeRelayCursor,
+  writeSyncCursor,
 } from "@/shared/sync/apply-remote";
 import { setSyncStatus } from "@/shared/sync/status";
 
@@ -102,11 +102,11 @@ export async function openAppDatabase(): Promise<AppDatabase> {
   const pullRemote = async () => {
     await withSyncStatus(async () => {
       await syncMutex.runExclusive(async () => {
-        const cursor = readRelayCursor(syncMeta);
+        const cursor = readSyncCursor(syncMeta);
         const pull = await transport.pull(cursor);
         await applyRemoteMutations({ notes, syncMeta }, pull.mutations);
         if (pull.cursor !== cursor) {
-          await writeRelayCursor(syncMeta, pull.cursor);
+          await writeSyncCursor(syncMeta, pull.cursor);
         }
       });
     });
@@ -120,14 +120,14 @@ export async function openAppDatabase(): Promise<AppDatabase> {
 
         await withSyncStatus(async () => {
           try {
-            const cursor = readRelayCursor(syncMeta);
+            const cursor = readSyncCursor(syncMeta);
             const { pull } = await runSyncCycle(transport, syncMutex, {
               cursor,
               outbox: mutationsFromTransaction(idempotencyKey, transaction.mutations),
             });
             await applyRemoteMutations({ notes, syncMeta }, pull.mutations);
             if (pull.cursor !== cursor) {
-              await writeRelayCursor(syncMeta, pull.cursor);
+              await writeSyncCursor(syncMeta, pull.cursor);
             }
           } catch (error) {
             setSyncStatus(
