@@ -28,7 +28,7 @@ test("export on one device, import on a fresh device, data (incl. tombstones) ma
 
   // In-app link, not page.goto() — goto() is a hard reload that would tear
   // down and re-open the whole DB (including a fresh, racy pullRemote()).
-  await pageA.getByRole("link", { name: "Ustawienia" }).click();
+  await pageA.getByRole("link", { name: "Settings" }).click();
   const downloadPromise = pageA.waitForEvent("download");
   await pageA.getByTestId("backup-export").click();
   const download = await downloadPromise;
@@ -44,16 +44,16 @@ test("export on one device, import on a fresh device, data (incl. tombstones) ma
   const contextB = await browser.newContext();
   const pageB = await contextB.newPage();
   await waitForNotesReady(pageB);
-  await pageB.getByRole("link", { name: "Ustawienia" }).click();
+  await pageB.getByRole("link", { name: "Settings" }).click();
 
   await pageB.getByTestId("backup-import").setInputFiles({
     name: "backup.json",
     mimeType: "application/json",
     buffer: Buffer.from(backupJson, "utf-8"),
   });
-  await expect(pageB.getByTestId("backup-status")).toContainText("Zaimportowano");
+  await expect(pageB.getByTestId("backup-status")).toContainText("Imported");
 
-  await pageB.getByRole("link", { name: "Wróć do notatek" }).click();
+  await pageB.getByRole("link", { name: "Notes" }).click();
   await expect(pageB.getByTestId("note-item").filter({ hasText: activeTitle })).toHaveCount(1);
   await expect(
     pageB.getByTestId("note-item").filter({ hasText: activeTitle }),
@@ -64,7 +64,7 @@ test("export on one device, import on a fresh device, data (incl. tombstones) ma
   await expect(pageB.getByTestId("note-item").filter({ hasText: deletedTitle })).toHaveCount(1);
   await expect(
     pageB.getByTestId("note-item").filter({ hasText: deletedTitle }),
-  ).toContainText("usunięta");
+  ).toContainText("(deleted)");
 
   await contextA.close();
   await contextB.close();
@@ -79,7 +79,7 @@ test("importing the same backup twice does not duplicate notes", async ({ browse
   await createNote(page, title, "once");
   await waitForNoteSynced(page, title);
 
-  await page.getByRole("link", { name: "Ustawienia" }).click();
+  await page.getByRole("link", { name: "Settings" }).click();
   const downloadPromise = page.waitForEvent("download");
   await page.getByTestId("backup-export").click();
   const download = await downloadPromise;
@@ -90,11 +90,11 @@ test("importing the same backup twice does not duplicate notes", async ({ browse
 
   const file = { name: "backup.json", mimeType: "application/json", buffer: Buffer.from(backupJson, "utf-8") };
   await page.getByTestId("backup-import").setInputFiles(file);
-  await expect(page.getByTestId("backup-status")).toContainText("Zaimportowano");
+  await expect(page.getByTestId("backup-status")).toContainText("Imported");
   await page.getByTestId("backup-import").setInputFiles(file);
-  await expect(page.getByTestId("backup-status")).toContainText("Zaimportowano 0/1");
+  await expect(page.getByTestId("backup-status")).toContainText("Imported 0/1");
 
-  await page.getByRole("link", { name: "Wróć do notatek" }).click();
+  await page.getByRole("link", { name: "Notes" }).click();
   await expect(page.getByTestId("note-item").filter({ hasText: title })).toHaveCount(1);
 
   await context.close();

@@ -18,13 +18,20 @@ describe("ai status machine", () => {
   it("transitions unavailable → available → downloading → ready → busy", () => {
     expect(aiStatusStore.get()).toEqual({ kind: "unavailable", reason: "disabled" });
     setAiAvailable();
-    expect(aiStatusStore.get()).toEqual({ kind: "available" });
+    expect(aiStatusStore.get()).toEqual({ kind: "available", cached: false });
     setAiDownloading(0.4);
-    expect(aiStatusStore.get()).toEqual({ kind: "downloading", progress: 0.4 });
+    expect(aiStatusStore.get()).toEqual({ kind: "downloading", progress: 0.4, fromCache: false });
     setAiReady();
     expect(aiStatusStore.get()).toEqual({ kind: "ready" });
     setAiBusy();
     expect(aiStatusStore.get()).toEqual({ kind: "busy" });
+  });
+
+  it("tracks cached=true when weights are already on disk", () => {
+    setAiAvailable(true);
+    expect(aiStatusStore.get()).toEqual({ kind: "available", cached: true });
+    setAiDownloading(0.2, true);
+    expect(aiStatusStore.get()).toEqual({ kind: "downloading", progress: 0.2, fromCache: true });
   });
 
   it("can report errors from any ready-ish state", () => {

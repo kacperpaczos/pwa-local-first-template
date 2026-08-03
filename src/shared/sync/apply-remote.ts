@@ -8,7 +8,7 @@ import { SYNC_META_ID } from "../db/sync-meta";
 import { parseSyncMutation } from "./protocol";
 import { mergeNote } from "./merge-note";
 import type { SyncMutation } from "./transport";
-import { setSyncStatus } from "./status";
+import { setSyncStatus, syncStatusStore } from "./status";
 
 export type SyncApplyTarget = {
   notes: Collection<Note, string>;
@@ -135,14 +135,20 @@ export async function writeSyncCursor(
 export const writeRelayCursor = writeSyncCursor;
 
 export function withSyncStatus<T>(fn: () => Promise<T>): Promise<T> {
-  setSyncStatus("syncing");
+  if (syncStatusStore.get() !== "outdated") {
+    setSyncStatus("syncing");
+  }
   return fn().then(
     (value) => {
-      setSyncStatus(typeof navigator !== "undefined" && !navigator.onLine ? "offline" : "idle");
+      if (syncStatusStore.get() !== "outdated") {
+        setSyncStatus(typeof navigator !== "undefined" && !navigator.onLine ? "offline" : "idle");
+      }
       return value;
     },
     (error) => {
-      setSyncStatus(typeof navigator !== "undefined" && !navigator.onLine ? "offline" : "idle");
+      if (syncStatusStore.get() !== "outdated") {
+        setSyncStatus(typeof navigator !== "undefined" && !navigator.onLine ? "offline" : "idle");
+      }
       throw error;
     },
   );

@@ -1,7 +1,9 @@
 import { atom } from "nanostores";
 
-export const syncStatusStore = atom<"idle" | "syncing" | "offline">("idle");
+export type SyncStatus = "idle" | "syncing" | "offline" | "outdated";
 
-export function setSyncStatus(status: "idle" | "syncing" | "offline"): void {
+export const syncStatusStore = atom<SyncStatus>("idle");
+
+export function setSyncStatus(status: SyncStatus): void {
   syncStatusStore.set(status);
 }

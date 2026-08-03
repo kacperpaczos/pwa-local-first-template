@@ -1,14 +1,33 @@
 <!DOCTYPE html>
-<html lang="pl">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#0f1419" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#f4f7fb" />
+    <meta name="color-scheme" content="light dark" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <title>pwa-local-first-template</title>
+    <script>
+      (function () {
+        try {
+          var key = "pwa-ui-theme";
+          var stored = localStorage.getItem(key);
+          var system = window.matchMedia("(prefers-color-scheme: dark)").matches
+            ? "dark"
+            : "light";
+          var mode = stored === "light" || stored === "dark" ? stored : system;
+          if (!stored) localStorage.setItem(key, "system");
+          document.documentElement.dataset.kbTheme = mode;
+          document.documentElement.style.colorScheme = mode;
+          document
+            .querySelector('meta[name="theme-color"]')
+            ?.setAttribute("content", mode === "dark" ? "#0f1419" : "#f4f7fb");
+        } catch (_) {}
+      })();
+    </script>
   </head>
   <body>
-    <noscript>Do uruchomienia aplikacji potrzebny jest JavaScript.</noscript>
+    <noscript>JavaScript is required to run this app.</noscript>
     <div id="root"></div>
     <script src="/src/index.tsx" type="module"></script>
   </body>

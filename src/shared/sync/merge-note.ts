@@ -1,5 +1,6 @@
 import type { Note } from "../db/schemas";
 import { mergeBodyDocs } from "../db/crdt";
+import { recordConflict } from "./conflict-log";
 
 /**
  * Per-field conflict resolution for notes (Phase 2 hybrid strategy):
@@ -8,6 +9,9 @@ import { mergeBodyDocs } from "../db/crdt";
  * - `body` is a Loro CRDT text doc, merged via causal history instead of a
  *   local/remote "winner" — this is the escalation path from LWW to CRDT
  *   for free-text content described in the Phase 2 report.
+ *
+ * When LWW rejects a local title / deleted_at that differs from the winner,
+ * a conflict_log entry is recorded (no-op without localStorage).
  */
 export function mergeNote(local: Note, remote: Note): Note {
   const title =
@@ -27,6 +31,26 @@ export function mergeNote(local: Note, remote: Note): Note {
         : remote.updated_at >= local.updated_at
           ? remote.deleted_at
           : local.deleted_at;
+
+  if (title === remote.title && local.title !== remote.title) {
+    recordConflict({
+      noteId: local.id,
+      field: "title",
+      lostValue: local.title,
+      lostLamport: local.title_lamport,
+      wonValue: remote.title,
+    });
+  }
+
+  if (deleted_at === remote.deleted_at && local.deleted_at !== remote.deleted_at) {
+    recordConflict({
+      noteId: local.id,
+      field: "deleted_at",
+      lostValue: local.deleted_at,
+      lostLamport: local.deleted_lamport,
+      wonValue: remote.deleted_at,
+    });
+  }
 
   const body = mergeBodyDocs(local.body_doc, remote.body_doc);
 

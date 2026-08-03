@@ -4,6 +4,9 @@ import { PersistenceUnavailableError } from "@tanstack/db-sqlite-persistence-cor
 import { openAppDatabase, type AppDatabase } from "./client";
 import { createPersistenceFacade, type PersistenceFacade } from "./facade";
 import { setSyncStatus } from "@/shared/sync/status";
+import { gcTombstones } from "@/shared/sync/gc";
+import { parseSyncCursorSeq } from "@/shared/sync/checkpoint";
+import { readSyncCursor } from "@/shared/sync/apply-remote";
 import { checkDatabaseIntegrity } from "@/backup/integrity";
 import { dbIntegrityStore } from "@/backup/status";
 import { exposeIdentityE2eHooks } from "@/shared/identity";
@@ -41,6 +44,15 @@ export const DbProvider: ParentComponent = (props) => {
     await db.notes.preload();
     await db.syncMeta.preload();
 
+    // Fire-and-forget tombstone GC after a successful preload.
+    const coveredSeq = parseSyncCursorSeq(readSyncCursor(db.syncMeta));
+    void gcTombstones(
+      db.notes,
+      coveredSeq > 0 ? { coveredSeq } : {},
+    ).catch(() => {
+      /* GC is best-effort */
+    });
+
     void db.pullRemote().catch(() => {
       setSyncStatus(
         typeof navigator !== "undefined" && !navigator.onLine ? "offline" : "idle",
@@ -65,11 +77,11 @@ export const DbProvider: ParentComponent = (props) => {
         <Show
           when={resource.error instanceof DbCorruptError ? resource.error : undefined}
           fallback={
-            <main style={{ padding: "2rem", "text-align": "center" }}>
-              <h1>Persystencja niedostępna</h1>
-              <p>
+            <main class="mx-auto flex min-h-dvh max-w-lg flex-col justify-center gap-2 p-6 text-center">
+              <h1 class="text-2xl font-semibold tracking-tight">Persistence unavailable</h1>
+              <p class="text-sm text-muted-foreground">
                 {resource.error instanceof PersistenceUnavailableError
-                  ? "Ta przeglądarka nie udostępnia OPFS (wymagane do lokalnego SQLite)."
+                  ? "This browser does not expose OPFS (required for local SQLite)."
                   : String(resource.error)}
               </p>
             </main>
@@ -79,7 +91,14 @@ export const DbProvider: ParentComponent = (props) => {
         </Show>
       }
     >
-      <Show when={resource()} fallback={<main style={{ padding: "2rem" }}>Ładowanie bazy…</main>}>
+      <Show
+        when={resource()}
+        fallback={
+          <main class="flex min-h-dvh items-center justify-center p-6 text-sm text-muted-foreground">
+            Loading database…
+          </main>
+        }
+      >
         {(value) => (
           <DbContext.Provider value={value()}>{props.children}</DbContext.Provider>
         )}

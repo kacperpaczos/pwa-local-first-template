@@ -27,5 +27,6 @@ export type Conflict = {
 export interface SyncTransport {
   push(outbox: readonly SyncMutation[]): Promise<PushResult>;
   pull(cursor: string | null): Promise<PullResult>;
+  /** No-op on transports: conflict merge happens locally in applyRemoteMutations. */
   resolve(conflicts: readonly Conflict[]): Promise<void>;
 }

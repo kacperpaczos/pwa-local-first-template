@@ -1,10 +1,13 @@
 /* @refresh reload */
 import { render } from "solid-js/web";
-import { registerSW } from "virtual:pwa-register";
 import "@/shared/styles/global.css";
 import App from "@/app/App";
 
-registerSW({ immediate: true });
+if (import.meta.env.VITE_E2E !== "1") {
+  void import("virtual:pwa-register").then(({ registerSW }) => {
+    registerSW({ immediate: true });
+  });
+}
 
 const root = document.getElementById("root");
 

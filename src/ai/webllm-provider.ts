@@ -1,3 +1,4 @@
+import { buildGroundedSystemPrompt } from "./grounding";
 import type {
   AiProvider,
   GenOpts,
@@ -61,6 +62,20 @@ export class WebLlmAiProvider implements AiProvider {
     }
   }
 
+  async *chat(message: string, opts?: GenOpts): AsyncIterable<string> {
+    yield* this.streamChat(
+      [
+        {
+          role: "system",
+          content:
+            "You are a helpful on-device assistant. Reply in the same language the user writes in. Be concise.",
+        },
+        { role: "user", content: message },
+      ],
+      opts,
+    );
+  }
+
   async *summarize(body: string, opts?: GenOpts): AsyncIterable<string> {
     yield* this.streamChat(
       [
@@ -96,14 +111,16 @@ export class WebLlmAiProvider implements AiProvider {
   }
 
   async *answer(question: string, context: NoteChunk[], opts?: GenOpts): AsyncIterable<string> {
-    const contextBlock = context
-      .map((c) => `[note ${c.noteId}]\n${c.text}`)
-      .join("\n\n");
+    const contextBlock =
+      context.length === 0
+        ? "(no note fragments above retrieval threshold)"
+        : context.map((c) => `[note ${c.noteId}]\n${c.text}`).join("\n\n");
+    const date = new Date().toISOString().slice(0, 10);
     yield* this.streamChat(
       [
         {
           role: "system",
-          content: "Answer using only the provided note context. If unsure, say so briefly.",
+          content: buildGroundedSystemPrompt(date),
         },
         {
           role: "user",
@@ -127,6 +144,14 @@ export class WebLlmAiProvider implements AiProvider {
     assertNotAborted(opts?.signal);
     if (!this.engine) {
       throw new Error("WebLLM engine is not initialized — call init() first");
+    }
+
+    // Clear KV cache between requests so consecutive turns don't accumulate
+    // GPU memory (common source of opaque WASM "memory" failures).
+    try {
+      await this.engine.resetChat?.(false);
+    } catch {
+      /* optional on stubs / older engines */
     }
 
     const stream = await this.engine.chat.completions.create({

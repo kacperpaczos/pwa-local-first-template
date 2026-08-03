@@ -1,5 +1,10 @@
 import { expect, type Browser, type BrowserContext, type Page } from "@playwright/test";
 import SEA from "gun/sea.js";
+import { exportSpaceKey, generateSpaceKey } from "../src/shared/crypto/envelope";
+import {
+  SPACE_ID_STORAGE_KEY,
+  SPACE_KEY_STORAGE_KEY,
+} from "../src/shared/identity/space";
 import { IDENTITY_STORAGE_KEY, type IdentityPayload, type SeaPair } from "../src/shared/identity/types";
 
 export const GUN_PEER_CTRL = "http://127.0.0.1:8765";
@@ -14,17 +19,45 @@ export async function resetGunPeer(): Promise<void> {
 /** @deprecated Use resetGunPeer */
 export const resetRelay = resetGunPeer;
 
+export type TestSpace = {
+  spaceId: string;
+  spaceKeyB64: string;
+};
+
 export async function generateTestIdentity(): Promise<IdentityPayload> {
   const pair = (await SEA.pair()) as SeaPair;
   return { v: 1, pair };
 }
 
-async function injectIdentity(context: BrowserContext, identity: IdentityPayload): Promise<void> {
+export async function generateTestSpace(): Promise<TestSpace> {
+  const key = await generateSpaceKey();
+  return {
+    spaceId: crypto.randomUUID(),
+    spaceKeyB64: await exportSpaceKey(key),
+  };
+}
+
+async function injectIdentity(
+  context: BrowserContext,
+  identity: IdentityPayload,
+  space?: TestSpace,
+): Promise<void> {
   await context.addInitScript(
-    ({ key, payload }) => {
-      localStorage.setItem(key, payload);
+    ({ identityKey, identityPayload, spaceIdKey, spaceKeyKey, spaceId, spaceKeyB64 }) => {
+      localStorage.setItem(identityKey, identityPayload);
+      if (spaceId && spaceKeyB64) {
+        localStorage.setItem(spaceIdKey, spaceId);
+        localStorage.setItem(spaceKeyKey, spaceKeyB64);
+      }
     },
-    { key: IDENTITY_STORAGE_KEY, payload: JSON.stringify(identity) },
+    {
+      identityKey: IDENTITY_STORAGE_KEY,
+      identityPayload: JSON.stringify(identity),
+      spaceIdKey: SPACE_ID_STORAGE_KEY,
+      spaceKeyKey: SPACE_KEY_STORAGE_KEY,
+      spaceId: space?.spaceId ?? null,
+      spaceKeyB64: space?.spaceKeyB64 ?? null,
+    },
   );
 }
 
@@ -70,17 +103,19 @@ export async function openTwoPeers(browser: Browser): Promise<{
   pageA: Page;
   pageB: Page;
   identity: IdentityPayload;
+  space: TestSpace;
 }> {
   const identity = await generateTestIdentity();
+  const space = await generateTestSpace();
   const contextA = await browser.newContext();
   const contextB = await browser.newContext();
-  await injectIdentity(contextA, identity);
-  await injectIdentity(contextB, identity);
+  await injectIdentity(contextA, identity, space);
+  await injectIdentity(contextB, identity, space);
   const pageA = await contextA.newPage();
   const pageB = await contextB.newPage();
   await waitForNotesReady(pageA);
   await waitForNotesReady(pageB);
-  return { contextA, contextB, pageA, pageB, identity };
+  return { contextA, contextB, pageA, pageB, identity, space };
 }
 
 export async function openTwoTabs(browser: Browser): Promise<{

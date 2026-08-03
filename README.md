@@ -21,16 +21,16 @@ Gun is used only as mesh transport for SEA-signed payloads. It is not the applic
 
 | Area | What it does |
 | --- | --- |
-| UI | Solid.js notes, settings, optional AI panel |
+| UI | Solid.js + SolidUI/Tailwind notes, settings, AI |
 | Local DB | TanStack DB + SQLite/OPFS behind `PersistenceFacade` |
 | Offline | `@tanstack/offline-transactions` outbox |
 | Sync | `GunSyncTransport` (or `NoopSyncTransport` when no peers) |
-| Identity | SEA keypair in `localStorage`; QR / JSON pairing |
-| Conflicts | LWW (title, soft-delete) + Loro CRDT (body) |
+| Identity | SEA keypair + AES-GCM space key; QR/JSON + SAS pairing; BIP39 recovery |
+| Conflicts | LWW (title, soft-delete) + Loro CRDT (body) + local conflict history |
 | PWA | Vite + Workbox service worker |
-| AI | Optional on-device summarisation (WebLLM) |
-| Backup | JSON export/import via the same merge path as sync |
-| Recovery | `PRAGMA integrity_check` at startup + recovery screen |
+| AI | Optional on-device WebLLM (summarize, meta, RAG, agent) |
+| Backup | JSON merge-import + SQL dump; integrity check + recovery |
+| Docs | [`docs/architecture.md`](docs/architecture.md) + [`docs/adr/`](docs/adr/) |
 
 **Browser target:** Chromium (OPFS required). Safari / WebKit are out of scope for now.
 
@@ -144,13 +144,15 @@ Editing the title does not clobber a concurrent soft-delete, and concurrent body
 
 ### Optional AI
 
-Gated by `VITE_AI_ENABLED`. The runtime checks WebGPU and storage headroom, then can download a small WebLLM model and summarise notes on-device. Embeddings / RAG are not implemented yet.
+Gated by `VITE_AI_ENABLED`. The runtime checks WebGPU and storage headroom, then can download a WebLLM model (tiered max/std/dev) and run summarize, title suggestions, local hash embeddings / semantic search, grounded RAG, and a thin agent with skills — all on-device. Real model downloads are consent-gated; CI uses injected mocks.
 
 ### Backup and recovery
 
-- Export: versioned JSON of notes.
+- Export: versioned JSON of notes (merge-safe re-import) and optional SQL dump for inspection.
 - Import: each note goes through `applyRemoteMutations` / `mergeNote` under the sync mutex.
 - On startup, integrity check runs **before** collection preload. Failure shows `RecoveryScreen` instead of a blank app.
+
+See also: [architecture](docs/architecture.md), [ADRs](docs/adr/), [gun-peer Docker](server/gun-peer/README.md).
 
 ---
 
@@ -208,29 +210,29 @@ Notes for e2e:
 - Local-first note CRUD with OPFS SQLite as source of truth
 - Offline writes through the outbox
 - Hybrid merge (LWW + Loro) with unit and e2e coverage
-- Swappable sync transport (Gun / noop)
-- SEA identity + QR/JSON device pairing
-- SEA-signed mutations on the Gun path
+- Swappable sync transport (Gun / noop) with protocol `v` gating
+- SEA identity + space-key AES-GCM, QR/JSON + SAS pairing, BIP39 recovery
+- SEA/space ciphertext on the Gun path (peer is untrusted for note bodies)
 - Multi-tab OPFS coordination
 - PWA installability / service worker caching for WASM assets
-- Feature-flagged on-device AI summarisation
-- JSON backup round-trip through merge (idempotent re-import)
+- Feature-flagged on-device AI (summarize, meta, RAG, agent, tiers)
+- JSON backup round-trip through merge + SQL dump
+- Tombstone GC, encrypted checkpoints, local conflict history
 - Startup integrity check and recovery UI
 - Automated unit + Chromium e2e suite
+- Dockerised gun-peer for production-style mesh hosting
 
 ---
 
 ## What still needs deliberate design
 
-- Trust and tenancy beyond “same SEA identity / shared peers”
-- Authorisation (capabilities / ACL), not only authentication via keypair
-- End-to-end encryption of note payloads at rest on peers
-- Whether sync should stay snapshot-based or move toward append-only ops
-- Peer durability and bootstrap UX without manual QR in every setup
+- Multi-user tenancy / capabilities beyond a shared SEA + space key
+- Device revocation and key rotation (Phase 5)
+- Whether sync should move from snapshot mutations toward append-only ops
 - Safari / non-Chromium hosts, or a native shell if OPFS remains limiting
 - Maturity of `@tanstack/browser-db-sqlite-persistence` (facade allows swap)
 - Longer-term schema evolution beyond current `schemaVersion` / backup schema
-- Whether a stack like p2panda/iroh is required at all (see below)
+- Whether a stack like p2panda/iroh is required at all (native-only today — see ADRs)
 
 ---
 

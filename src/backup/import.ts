@@ -9,7 +9,7 @@ export function parseBackupFile(raw: string): Backup {
   try {
     data = JSON.parse(raw);
   } catch {
-    throw new Error("Plik nie jest poprawnym JSON-em.");
+    throw new Error("File is not valid JSON.");
   }
   return backupSchema.parse(data);
 }
