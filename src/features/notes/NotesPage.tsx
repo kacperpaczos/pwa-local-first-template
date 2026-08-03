@@ -63,6 +63,7 @@ const NotesPage: Component = () => {
         <h1 class={styles.title}>Notatki</h1>
         <nav class={styles.nav}>
           <A href="/">Home</A>
+          <A href="/settings">Ustawienia</A>
         </nav>
       </header>
 

@@ -1,4 +1,5 @@
 import type { AppDatabase } from "./client";
+import { ensureStoragePersisted } from "@/backup/status";
 import { createBodyDoc, updateBodyDoc } from "./crdt";
 import { createEntityId } from "./ids";
 import { nextLamport } from "./lamport";
@@ -23,6 +24,7 @@ export type PersistenceFacade = {
 export function createPersistenceFacade(db: AppDatabase): PersistenceFacade {
   return {
     async createNote(rawInput) {
+      void ensureStoragePersisted();
       const input = parseCreateNoteInput(rawInput);
       const now = new Date().toISOString();
       const body = createBodyDoc(input.body?.trim() ?? "");

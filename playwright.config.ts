@@ -32,7 +32,7 @@ export default defineConfig({
     },
     {
       name: "chromium-sync",
-      testMatch: /(?:offline-sync|multi-tab|relay-peers|merge-body)\.spec\.ts/,
+      testMatch: /(?:offline-sync|multi-tab|relay-peers|merge-body|backup)\.spec\.ts/,
       fullyParallel: false,
       workers: 1,
       use: { ...devices["Desktop Chrome"] },

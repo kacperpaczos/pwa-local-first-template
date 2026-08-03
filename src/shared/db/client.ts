@@ -30,6 +30,8 @@ export type AppDatabase = {
   offline: OfflineExecutor;
   transport: SyncTransport;
   syncMutex: SyncMutex;
+  /** Raw wa-sqlite handle — integrity checks (Etap 4.0) and future .sqlite export. */
+  rawDb: { execute: <TRow = unknown>(sql: string, params?: readonly unknown[]) => Promise<readonly TRow[]> };
   pullRemote: () => Promise<void>;
   close: () => Promise<void>;
 };
@@ -153,6 +155,7 @@ export async function openAppDatabase(): Promise<AppDatabase> {
     offline,
     transport,
     syncMutex,
+    rawDb: database,
     pullRemote,
     close: async () => {
       if (typeof window !== "undefined") {
