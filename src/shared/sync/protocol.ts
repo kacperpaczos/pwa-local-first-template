@@ -1,5 +1,8 @@
 import * as z from "zod/mini";
 import { noteSchema } from "../db/schemas";
+import { getEntitySchema, registerEntitySchema } from "./entity-registry";
+
+registerEntitySchema("notes", noteSchema);
 
 /** Current mutation wire protocol version (Gun SEA graph). */
 export const PROTOCOL_VERSION = 1;
@@ -26,12 +29,22 @@ export class ProtocolVersionError extends Error {
   }
 }
 
+export class UnknownEntityError extends Error {
+  readonly name = "UnknownEntityError";
+  readonly entity: string;
+
+  constructor(entity: string) {
+    super(`Unknown sync entity "${entity}"`);
+    this.entity = entity;
+  }
+}
+
 export const syncMutationSchema = z.object({
   v: z.number(),
   idempotencyKey: z.string().check(z.minLength(1)),
-  entity: z.literal("notes"),
+  entity: z.string().check(z.minLength(1)),
   op: z.enum(["upsert", "soft_delete"]),
-  payload: noteSchema,
+  payload: z.unknown(),
 });
 
 export type ValidatedSyncMutation = z.infer<typeof syncMutationSchema>;
@@ -51,5 +64,12 @@ export function parseSyncMutation(data: unknown): ValidatedSyncMutation {
   if (!isSupportedProtocolVersion(parsed.v)) {
     throw new ProtocolVersionError(parsed.v);
   }
+
+  const entitySchema = getEntitySchema(parsed.entity);
+  if (!entitySchema) {
+    throw new UnknownEntityError(parsed.entity);
+  }
+  entitySchema.parse(parsed.payload);
+
   return parsed;
 }

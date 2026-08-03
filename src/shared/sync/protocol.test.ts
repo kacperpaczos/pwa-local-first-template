@@ -6,9 +6,11 @@ import {
   ProtocolVersionError,
   SUPPORTED_MAX_V,
   SUPPORTED_MIN_V,
+  UnknownEntityError,
 } from "./protocol";
 import { createBodyDoc } from "../db/crdt";
 import { createEntityId } from "../db/ids";
+import { parseNote } from "../db/schemas";
 
 function notePayload(title = "Hello") {
   const body = createBodyDoc("body");
@@ -35,7 +37,7 @@ describe("sync protocol", () => {
     const parsed = parseSyncMutation(mutation);
     expect(parsed.v).toBe(PROTOCOL_VERSION);
     expect(parsed.idempotencyKey).toBe("k1");
-    expect(parsed.payload.body_doc).toBe(mutation.payload.body_doc);
+    expect(parseNote(parsed.payload).body_doc).toBe(mutation.payload.body_doc);
   });
 
   it("accepts an explicit supported version", () => {
@@ -92,6 +94,21 @@ describe("sync protocol", () => {
       expect(error).toBeInstanceOf(ProtocolVersionError);
       expect((error as ProtocolVersionError).version).toBe(tooLow);
       expect((error as ProtocolVersionError).message).toMatch(/Unsupported protocol version/);
+    }
+  });
+
+  it("rejects an unregistered entity with UnknownEntityError", () => {
+    try {
+      parseSyncMutation({
+        idempotencyKey: "k5",
+        entity: "widgets",
+        op: "upsert",
+        payload: {},
+      });
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toBeInstanceOf(UnknownEntityError);
+      expect((error as UnknownEntityError).entity).toBe("widgets");
     }
   });
 });
