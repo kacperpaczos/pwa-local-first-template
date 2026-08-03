@@ -1,0 +1,14 @@
+{
+  "name": "gun-peer",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Self-contained Gun relay peer for Docker / production mesh",
+  "scripts": {
+    "start": "node --import tsx index.ts"
+  },
+  "dependencies": {
+    "gun": "^0.2020.1241",
+    "tsx": "^4.23.4"
+  }
+}

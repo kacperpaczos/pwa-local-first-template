@@ -19,7 +19,7 @@ import {
   withSyncStatus,
   writeSyncCursor,
 } from "@/shared/sync/apply-remote";
-import { setSyncStatus } from "@/shared/sync/status";
+import { setSyncStatus, syncStatusStore } from "@/shared/sync/status";
 
 const DB_FILE = "pwa-local-first.sqlite";
 const DB_NAME = "pwa-local-first";
@@ -30,9 +30,11 @@ export type AppDatabase = {
   offline: OfflineExecutor;
   transport: SyncTransport;
   syncMutex: SyncMutex;
-  /** Raw wa-sqlite handle — integrity checks (Etap 4.0) and future .sqlite export. */
+  /** Raw wa-sqlite handle — integrity checks and SQL dump export. */
   rawDb: { execute: <TRow = unknown>(sql: string, params?: readonly unknown[]) => Promise<readonly TRow[]> };
   pullRemote: () => Promise<void>;
+  /** Close the current Gun transport and open a fresh one (post identity import). */
+  reinitSyncTransport: () => Promise<void>;
   close: () => Promise<void>;
 };
 
@@ -96,7 +98,7 @@ export async function openAppDatabase(): Promise<AppDatabase> {
     }),
   );
 
-  const transport = createSyncTransport();
+  let transport: SyncTransport = createSyncTransport();
   const syncMutex = new SyncMutex();
 
   const pullRemote = async () => {
@@ -130,15 +132,26 @@ export async function openAppDatabase(): Promise<AppDatabase> {
               await writeSyncCursor(syncMeta, pull.cursor);
             }
           } catch (error) {
-            setSyncStatus(
-              typeof navigator !== "undefined" && !navigator.onLine ? "offline" : "idle",
-            );
+            if (syncStatusStore.get() !== "outdated") {
+              setSyncStatus(
+                typeof navigator !== "undefined" && !navigator.onLine ? "offline" : "idle",
+              );
+            }
             throw error;
           }
         });
       },
     },
   });
+
+  const reinitSyncTransport = async () => {
+    const previous = transport;
+    if ("close" in previous && typeof previous.close === "function") {
+      await previous.close();
+    }
+    transport = createSyncTransport();
+    dbHandle.transport = transport;
+  };
 
   const onOnline = () => {
     void pullRemote().catch(() => {
@@ -149,7 +162,7 @@ export async function openAppDatabase(): Promise<AppDatabase> {
     window.addEventListener("online", onOnline);
   }
 
-  return {
+  const dbHandle: AppDatabase = {
     notes,
     syncMeta,
     offline,
@@ -157,6 +170,7 @@ export async function openAppDatabase(): Promise<AppDatabase> {
     syncMutex,
     rawDb: database,
     pullRemote,
+    reinitSyncTransport,
     close: async () => {
       if (typeof window !== "undefined") {
         window.removeEventListener("online", onOnline);
@@ -169,4 +183,11 @@ export async function openAppDatabase(): Promise<AppDatabase> {
       await database.close?.();
     },
   };
+
+  return dbHandle;
+}
+
+/** Close and recreate Gun transport after identity / space-key import. */
+export async function reinitSyncTransport(db: AppDatabase): Promise<void> {
+  await db.reinitSyncTransport();
 }

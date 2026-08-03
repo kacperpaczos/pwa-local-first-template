@@ -71,6 +71,7 @@ export default defineConfig({
     }),
   ],
   optimizeDeps: {
+    exclude: ["loro-crdt", "@mlc-ai/web-llm"],
     include: [
       "gun",
       "gun/gun",
@@ -82,6 +83,10 @@ export default defineConfig({
       "gun/lib/store",
       "gun/lib/rindexed",
     ],
+  },
+  assetsInclude: ["**/*.wasm"],
+  worker: {
+    format: "es",
   },
   resolve: {
     alias: {

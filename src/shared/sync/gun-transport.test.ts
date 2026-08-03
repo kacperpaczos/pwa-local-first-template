@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import SEA from "gun/sea";
 import { GunSyncTransport, parseGunPeers } from "./gun-transport";
 import type { SeaPair } from "@/shared/identity";
 import { generatePair } from "@/shared/identity";
+import { PROTOCOL_VERSION, SUPPORTED_MAX_V } from "./protocol";
+import { setSyncStatus, syncStatusStore } from "./status";
 
 type Listener = (data: unknown, key: string) => void;
 
@@ -72,6 +75,7 @@ function createFakeGun() {
   return {
     user: () => user,
     get: (key: string) => chain(key),
+    store,
   };
 }
 
@@ -100,6 +104,7 @@ describe("parseGunPeers", () => {
 describe("GunSyncTransport", () => {
   afterEach(() => {
     vi.useRealTimers();
+    setSyncStatus("idle");
   });
 
   it("pushes mutations and pulls them back after cursor", async () => {
@@ -134,6 +139,106 @@ describe("GunSyncTransport", () => {
     await transport.close();
   });
 
+  it("puts PROTOCOL_VERSION on the wire and never plaintext note content", async () => {
+    const pair = await generatePair();
+    const fake = createFakeGun();
+    const transport = new GunSyncTransport({
+      peers: ["http://fake/gun"],
+      pair,
+      createGun: () => fake as never,
+    });
+
+    await transport.push([
+      {
+        idempotencyKey: "k1",
+        entity: "notes",
+        op: "upsert",
+        payload: sampleNote,
+      },
+    ]);
+
+    const rows = [...fake.store.values()] as Record<string, unknown>[];
+    expect(rows).toHaveLength(1);
+    const row = rows[0]!;
+    expect(row.v).toBe(PROTOCOL_VERSION);
+    expect(row).not.toHaveProperty("payloadJson");
+    expect(typeof row.ciphertext).toBe("string");
+    const serialized = JSON.stringify(row);
+    expect(serialized).not.toContain(sampleNote.title);
+    expect(serialized).not.toContain(sampleNote.body);
+
+    await transport.close();
+  });
+
+  it("skips unsupported protocol versions and sets outdated status", async () => {
+    const pair = await generatePair();
+    const fake = createFakeGun();
+    const transport = new GunSyncTransport({
+      peers: ["http://fake/gun"],
+      pair,
+      createGun: () => fake as never,
+    });
+
+    // Wait for auth + subscribe before injecting a foreign wire row.
+    await transport.pull(null);
+
+    const ciphertext = await SEA.encrypt(sampleNote, pair);
+    expect(typeof ciphertext).toBe("string");
+
+    fake
+      .user()
+      .get("app_sync")
+      .get("notes")
+      .get("future-v")
+      .put({
+        v: SUPPORTED_MAX_V + 1,
+        idempotencyKey: "future-v",
+        entity: "notes",
+        op: "upsert",
+        ciphertext,
+        seq: 42,
+      });
+
+    // Allow any async follow-up; unsupported v should short-circuit before decrypt.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(syncStatusStore.get()).toBe("outdated");
+    const pull = await transport.pull(null);
+    expect(pull.mutations).toHaveLength(0);
+
+    await transport.close();
+  });
+
+  it("cannot decrypt mutations pushed under a different pair", async () => {
+    const writerPair = await generatePair();
+    const readerPair = await generatePair();
+    const fake = createFakeGun();
+
+    const writer = new GunSyncTransport({
+      peers: ["http://fake/gun"],
+      pair: writerPair,
+      createGun: () => fake as never,
+    });
+    await writer.push([
+      {
+        idempotencyKey: "k1",
+        entity: "notes",
+        op: "upsert",
+        payload: sampleNote,
+      },
+    ]);
+    await writer.close();
+
+    const reader = new GunSyncTransport({
+      peers: ["http://fake/gun"],
+      pair: readerPair,
+      createGun: () => fake as never,
+    });
+    const pull = await reader.pull(null);
+    expect(pull.mutations).toHaveLength(0);
+    await reader.close();
+  });
+
   it("rejects invalid outbox payloads", async () => {
     const pair = await generatePair();
     const fake = createFakeGun();
@@ -154,5 +259,65 @@ describe("GunSyncTransport", () => {
     expect(push.accepted).toEqual([]);
     expect(push.rejected[0]?.idempotencyKey).toBe("bad");
     await transport.close();
+  });
+
+  it("encrypts with space key and still decrypts legacy SEA rows", async () => {
+    const pair = await generatePair();
+    const { generateSpaceKey } = await import("@/shared/crypto/envelope");
+    const spaceKey = await generateSpaceKey();
+    const spaceId = "space-test-1";
+    const fake = createFakeGun();
+
+    const writer = new GunSyncTransport({
+      peers: ["http://fake/gun"],
+      pair,
+      spaceKey,
+      spaceId,
+      createGun: () => fake as never,
+    });
+    await writer.push([
+      {
+        idempotencyKey: "space-k1",
+        entity: "notes",
+        op: "upsert",
+        payload: sampleNote,
+      },
+    ]);
+
+    const rows = [...fake.store.values()] as Record<string, unknown>[];
+    expect(rows).toHaveLength(1);
+    const wireCt = String(rows[0]!.ciphertext);
+    expect(wireCt).toContain('"k":"space"');
+    expect(wireCt).not.toContain(sampleNote.title);
+
+    // Inject a legacy SEA-encrypted row alongside space-sealed traffic.
+    const legacyCt = await SEA.encrypt(sampleNote, pair);
+    fake
+      .user()
+      .get("app_sync")
+      .get("notes")
+      .get("legacy-k")
+      .put({
+        v: PROTOCOL_VERSION,
+        idempotencyKey: "legacy-k",
+        entity: "notes",
+        op: "upsert",
+        ciphertext: legacyCt,
+        seq: 99,
+      });
+
+    const reader = new GunSyncTransport({
+      peers: ["http://fake/gun"],
+      pair,
+      spaceKey,
+      spaceId,
+      createGun: () => fake as never,
+    });
+    const pull = await reader.pull(null);
+    const keys = pull.mutations.map((m) => m.idempotencyKey).sort();
+    expect(keys).toEqual(["legacy-k", "space-k1"]);
+
+    await writer.close();
+    await reader.close();
   });
 });

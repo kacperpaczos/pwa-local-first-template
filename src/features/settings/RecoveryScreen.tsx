@@ -2,6 +2,15 @@ import { createSignal, type Component } from "solid-js";
 import type { AppDatabase } from "@/shared/db/client";
 import { downloadBackupFile, exportNotesAsBackup } from "@/backup/export";
 import { importBackup, parseBackupFile } from "@/backup/import";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 
 type Props = {
   db: AppDatabase;
@@ -22,7 +31,7 @@ const RecoveryScreen: Component<Props> = (props) => {
     try {
       const backup = exportNotesAsBackup(props.db.notes);
       downloadBackupFile(backup);
-      setStatus(`Pobrano kopię: ${backup.notes.length} notatek.`);
+      setStatus(`Downloaded backup: ${backup.notes.length} notes.`);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
     } finally {
@@ -45,7 +54,7 @@ const RecoveryScreen: Component<Props> = (props) => {
         backup,
       );
       setStatus(
-        `Zaimportowano ${summary.applied}/${summary.totalInBackup} notatek. Odśwież stronę.`,
+        `Imported ${summary.applied}/${summary.totalInBackup} notes. Refresh the page.`,
       );
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
@@ -56,37 +65,47 @@ const RecoveryScreen: Component<Props> = (props) => {
   };
 
   return (
-    <main style={{ padding: "2rem", "max-width": "40rem", margin: "0 auto" }}>
-      <h1>Baza danych uszkodzona</h1>
-      <p>
-        Sprawdzenie integralności lokalnej bazy SQLite nie powiodło się. Zanim cokolwiek
-        nadpiszemy, pobierz to, co da się jeszcze odczytać, albo przywróć wcześniejszą kopię
-        zapasową.
-      </p>
+    <main class="mx-auto flex min-h-dvh max-w-lg flex-col justify-center gap-4 p-4 sm:p-6">
+      <Alert variant="destructive">
+        <AlertTitle>Database corrupted</AlertTitle>
+        <AlertDescription>
+          Local SQLite integrity check failed. Before overwriting anything, download whatever is
+          still readable, or restore from a previous backup.
+        </AlertDescription>
+      </Alert>
 
-      <div style={{ display: "grid", gap: "0.75rem", "margin-top": "1.5rem" }}>
-        <button
-          type="button"
-          data-testid="recovery-export"
-          disabled={busy()}
-          onClick={() => void onExportReadable()}
-        >
-          Pobierz to, co czytelne
-        </button>
-
-        <label>
-          Importuj z kopii zapasowej
-          <input
-            type="file"
-            accept="application/json"
-            data-testid="recovery-import"
+      <Card>
+        <CardHeader>
+          <CardTitle>Recovery</CardTitle>
+          <CardDescription>Export readable rows or restore a JSON backup.</CardDescription>
+        </CardHeader>
+        <CardContent class="space-y-3">
+          <Button
+            class="w-full sm:w-auto"
+            data-testid="recovery-export"
             disabled={busy()}
-            onChange={(e) => void onImport(e)}
-          />
-        </label>
-
-        {status() && <p data-testid="recovery-status">{status()}</p>}
-      </div>
+            onClick={() => void onExportReadable()}
+          >
+            Download readable data
+          </Button>
+          <label class="block space-y-2 text-sm">
+            <span class="font-medium">Import from backup</span>
+            <input
+              type="file"
+              accept="application/json"
+              class="block w-full text-sm file:mr-3 file:rounded-md file:border-0 file:bg-secondary file:px-3 file:py-2 file:text-secondary-foreground"
+              data-testid="recovery-import"
+              disabled={busy()}
+              onChange={(e) => void onImport(e)}
+            />
+          </label>
+          {status() && (
+            <p class="text-sm text-muted-foreground" data-testid="recovery-status">
+              {status()}
+            </p>
+          )}
+        </CardContent>
+      </Card>
     </main>
   );
 };

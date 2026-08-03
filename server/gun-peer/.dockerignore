@@ -1,0 +1,4 @@
+node_modules
+.gun-data
+.gun-test-data
+npm-debug.log*

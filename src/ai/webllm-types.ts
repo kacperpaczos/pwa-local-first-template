@@ -21,6 +21,8 @@ export type WebLlmEngine = {
       >;
     };
   };
+  /** Clears KV cache between turns; optional on stubs. */
+  resetChat?: (keepStats?: boolean) => Promise<void>;
   unload: () => Promise<void>;
 };
 

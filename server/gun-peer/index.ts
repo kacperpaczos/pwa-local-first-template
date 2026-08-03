@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import Gun from "gun";
 
 const PORT = Number(process.env.GUN_PEER_PORT ?? 8765);
+const HOST = process.env.GUN_PEER_HOST ?? "127.0.0.1";
 const TEST_MODE =
   process.env.GUN_PEER_TEST_MODE === "1" || process.env.NODE_ENV === "test";
 
@@ -30,6 +31,12 @@ ensureDataDir();
 const server = http.createServer((req, res) => {
   const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "127.0.0.1"}`);
   const isTestPath = url.pathname.startsWith("/test/");
+
+  // Always-available liveness probe (production + test).
+  if (url.pathname === "/healthz" && req.method === "GET") {
+    writeJson(res, 200, { ok: true });
+    return;
+  }
 
   if (isTestPath) {
     if (!TEST_MODE) {
@@ -66,8 +73,8 @@ const gun = Gun({
   radisk: true,
 });
 
-server.listen(PORT, "127.0.0.1", () => {
-  console.log(`[gun-peer] listening on http://127.0.0.1:${PORT}/gun (test=${TEST_MODE})`);
+server.listen(PORT, HOST, () => {
+  console.log(`[gun-peer] listening on http://${HOST}:${PORT}/gun (test=${TEST_MODE})`);
 });
 
-export { gun, server, PORT };
+export { gun, server, PORT, HOST };
