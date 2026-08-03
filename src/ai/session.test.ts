@@ -87,4 +87,36 @@ describe("AI session download + inference", () => {
   it("summarizeWithAi requires a ready model", async () => {
     await expect(summarizeWithAi("x")).rejects.toThrow(/not ready/);
   });
+
+  it("dedupes concurrent downloadAiModel calls", async () => {
+    let initCalls = 0;
+    globalThis.__createAiProvider = () => ({
+      ...mockProvider(),
+      init: vi.fn(async (onProgress) => {
+        initCalls += 1;
+        await new Promise((r) => setTimeout(r, 30));
+        onProgress({ progress: 1, text: "done" });
+      }),
+    });
+
+    await Promise.all([downloadAiModel(), downloadAiModel()]);
+    expect(initCalls).toBe(1);
+    expect(aiStatusStore.get()).toEqual({ kind: "ready" });
+  });
+});
+
+describe("shouldUseAiHarness", () => {
+  it("allows DEV, VITE_E2E=1, and Vitest MODE=test", async () => {
+    const { shouldUseAiHarness } = await import("./session");
+    expect(shouldUseAiHarness({ DEV: true })).toBe(true);
+    expect(shouldUseAiHarness({ VITE_E2E: "1" })).toBe(true);
+    expect(shouldUseAiHarness({ MODE: "test" })).toBe(true);
+  });
+
+  it("blocks production builds", async () => {
+    const { shouldUseAiHarness } = await import("./session");
+    expect(shouldUseAiHarness({ DEV: false, MODE: "production", VITE_E2E: undefined })).toBe(
+      false,
+    );
+  });
 });
