@@ -4,6 +4,9 @@ import { PersistenceUnavailableError } from "@tanstack/db-sqlite-persistence-cor
 import { openAppDatabase, type AppDatabase } from "./client";
 import { createPersistenceFacade, type PersistenceFacade } from "./facade";
 import { setSyncStatus } from "@/shared/sync/status";
+import { checkDatabaseIntegrity } from "@/backup/integrity";
+import { dbIntegrityStore } from "@/backup/status";
+import RecoveryScreen from "@/features/settings/RecoveryScreen";
 
 type DbContextValue = {
   db: AppDatabase;
@@ -12,12 +15,31 @@ type DbContextValue = {
 
 const DbContext = createContext<DbContextValue>();
 
+export class DbCorruptError extends Error {
+  constructor(public readonly db: AppDatabase) {
+    super("SQLite integrity check failed");
+    this.name = "DbCorruptError";
+  }
+}
+
 export const DbProvider: ParentComponent = (props) => {
   const [resource] = createResource(async () => {
     const db = await openAppDatabase();
+
+    // Runs before anything else touches storage: the persistence layer's own
+    // driver serializes all further OPFS access through its internal queue,
+    // and a raw PRAGMA issued concurrently with that queue can deadlock the
+    // OPFS sync access handle instead of just erroring.
+    const intact = await checkDatabaseIntegrity(db.rawDb);
+    dbIntegrityStore.set(intact ? "ok" : "corrupt");
+    if (!intact) {
+      throw new DbCorruptError(db);
+    }
+
     await db.offline.waitForInit();
     await db.notes.preload();
     await db.syncMeta.preload();
+
     void db.pullRemote().catch(() => {
       setSyncStatus(
         typeof navigator !== "undefined" && !navigator.onLine ? "offline" : "idle",
@@ -38,14 +60,21 @@ export const DbProvider: ParentComponent = (props) => {
     <Show
       when={!resource.error}
       fallback={
-        <main style={{ padding: "2rem", "text-align": "center" }}>
-          <h1>Persystencja niedostępna</h1>
-          <p>
-            {resource.error instanceof PersistenceUnavailableError
-              ? "Ta przeglądarka nie udostępnia OPFS (wymagane do lokalnego SQLite)."
-              : String(resource.error)}
-          </p>
-        </main>
+        <Show
+          when={resource.error instanceof DbCorruptError ? resource.error : undefined}
+          fallback={
+            <main style={{ padding: "2rem", "text-align": "center" }}>
+              <h1>Persystencja niedostępna</h1>
+              <p>
+                {resource.error instanceof PersistenceUnavailableError
+                  ? "Ta przeglądarka nie udostępnia OPFS (wymagane do lokalnego SQLite)."
+                  : String(resource.error)}
+              </p>
+            </main>
+          }
+        >
+          {(error) => <RecoveryScreen db={error().db} />}
+        </Show>
       }
     >
       <Show when={resource()} fallback={<main style={{ padding: "2rem" }}>Ładowanie bazy…</main>}>

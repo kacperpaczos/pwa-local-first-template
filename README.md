@@ -59,9 +59,11 @@ src/
   app/                 # shell + routing
   features/notes/      # UI domeny
   features/ai/         # UI warstwy AI (Faza 3), warunkowe na stanie ai/
+  features/settings/   # eksport/import kopii zapasowej, status persist, recovery screen (Faza 4)
   shared/db/           # fasada zapisu, schemas Zod, UUIDv7, Lamport, sync_meta
   shared/sync/         # SyncTransport, WS adapter, LWW, mutex, protocol
   ai/                  # Faza 3 (WebLLM, lokalnie): flaga, detekcja WebGPU/storage, maszyna stanów
+  backup/               # Faza 4 (Etap 4.0): eksport/import JSON, storage.persist(), integrity check
 server/relay/          # append-only WebSocket relay (Phase 2)
 ```
 
@@ -81,6 +83,14 @@ server/relay/          # append-only WebSocket relay (Phase 2)
 - `initAiFeature()` rozstrzyga `unavailable` vs `available`; pobranie modelu i streszczenie startują z `AiPanel` (`Pobierz model` / `Streszcz`).
 - Testy: unit ze stubem silnika; e2e ze stubem `navigator.gpu` + `globalThis.__createAiProvider` (bez pobierania wag z Hugging Face w CI).
 - Embeddingi / RAG — kolejne etapy.
+
+### Faza 4, Etap 4.0 — backup, eksport, trwałość storage
+
+- `src/backup/export.ts` / `import.ts`: kopia zapasowa jako JSON (schemat wersjonowany, Zod), pobierana z `/settings`. Import **nie nadpisuje** — każda notatka z pliku idzie tą samą ścieżką co zdalna mutacja sync (`applyRemoteMutations`/`mergeNote`), więc ponowny import tego samego pliku jest no-opem, a import na urządzenie z nowszymi lokalnymi zmianami przegrywa z per-polowym LWW. Import działa pod `db.syncMutex` — bez tego potrafi się wyścigać z tłem `pullRemote()` tej samej karty.
+- Eksport `.sqlite` (surowa kopia pliku OPFS) — świadomie odłożone; na razie tylko JSON.
+- `navigator.storage.persist()` wołane raz na sesję przy pierwszej notatce (`backup/status.ts`); status widoczny w `/settings`.
+- `PRAGMA integrity_check` przy starcie, **przed** `preload()` kolekcji (`shared/db/DbProvider.tsx`) — wykonanie go po `preload()` potrafi się zawiesić, bo bezpośrednie zapytanie na surowym uchwycie wa-sqlite ściera się z wewnętrzną kolejką sterownika persystencji, która w tym momencie już trzyma połączenie OPFS. Błąd integralności pokazuje `RecoveryScreen` (eksport tego, co czytelne + import z pliku) zamiast białego ekranu.
+- e2e (`e2e/backup.spec.ts`): eksport na jednym urządzeniu → import na świeżym kontekście (= świeży OPFS) → dane, w tym tombstone, identyczne; podwójny import bez duplikatów. **Ważne dla własnych testów:** `page.goto()` to zawsze pełny reload (nowe `openAppDatabase()` + świeży `pullRemote()`), nie nawigacja SPA — używaj klikania linków (`<A>`) do przechodzenia między `/notes` i `/settings` w trakcie testu, inaczej reload może się wyścigić z mutacją, która jeszcze nie zdążyła się zsynchronizować (patrz `waitForNoteSynced` w `e2e/helpers.ts`).
 
 ## Konfiguracja sync
 

@@ -83,9 +83,40 @@ type DbHarness = {
     softDeleteNote: (id: string) => Promise<{ id: string }>;
   };
   db: {
-    notes: { get: (id: string) => { id: string; body: string; title: string } | undefined };
+    notes: {
+      get: (id: string) => { id: string; body: string; title: string } | undefined;
+      toArray: Array<{ id: string; title: string; $synced?: boolean }>;
+    };
   };
 };
+
+/**
+ * Polls the collection (not a shared relay counter — other parallel e2e
+ * projects push to the same relay, so a global entry count is not a
+ * reliable proxy for "this note's own sync cycle finished"). Needed before
+ * any full page navigation: a reload's own pullRemote() can otherwise race
+ * a not-yet-pushed local write and clobber it with a stale echo.
+ */
+export async function waitForNoteSynced(
+  page: Page,
+  title: string,
+  timeout = 15_000,
+): Promise<string> {
+  await getDb(page);
+  return page.evaluate(
+    async ({ noteTitle, timeoutMs }) => {
+      const harness = (globalThis as unknown as { __db: DbHarness }).__db;
+      const deadline = Date.now() + timeoutMs;
+      while (Date.now() < deadline) {
+        const found = harness.db.notes.toArray.find((n) => n.title === noteTitle);
+        if (found?.$synced) return found.id;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      throw new Error(`Note never reached $synced=true: ${noteTitle}`);
+    },
+    { noteTitle: title, timeoutMs: timeout },
+  );
+}
 
 export async function getDb(page: Page): Promise<void> {
   await page.waitForFunction(() => Boolean((globalThis as { __db?: unknown }).__db), null, {
