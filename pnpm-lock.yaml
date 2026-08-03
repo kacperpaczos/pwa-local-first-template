@@ -29,6 +29,9 @@ importers:
       '@tanstack/solid-db':
         specifier: ^0.2.31
         version: 0.2.31(solid-js@1.9.9)(typescript@5.9.2)
+      loro-crdt:
+        specifier: ^1.13.9
+        version: 1.13.9
       nanostores:
         specifier: ^1.4.2
         version: 1.4.2
@@ -2066,6 +2069,9 @@ packages:
 
   lodash.debounce@4.0.8:
     resolution: {integrity: sha512-FT1yDzDYEoYWhnSGnpE/4Kj1fLZkDFyqRb7fNt6FdYOSxlUWAtp42Eh6Wb0rGIv/m9Bgo7x4GhQbm5Ys4SG5ow==}
+
+  loro-crdt@1.13.9:
+    resolution: {integrity: sha512-gZYkMy1mqP1wzZqhQ69rNQowOuohLPcLbVQ+MjeJh3dbiXR+XJnbbP1GMxkJ0uBNbRbGmR2w+LazSDQImIJDrw==}
 
   lru-cache@11.5.2:
     resolution: {integrity: sha512-4pfM1Ff0x50o0tQwb5ucw/RzNyD0/YJME6IVcStalZuMWxdt3sR3huStTtxz4PUmvZfRguvDejasvQ2kifR11g==}
@@ -4893,6 +4899,8 @@ snapshots:
       lightningcss-win32-x64-msvc: 1.33.0
 
   lodash.debounce@4.0.8: {}
+
+  loro-crdt@1.13.9: {}
 
   lru-cache@11.5.2: {}
 
