@@ -5,14 +5,15 @@ import {
   findNoteIdByTitle,
   openTwoPeers,
   readNoteBodyViaDb,
-  resetRelay,
+  resetGunPeer,
   syncNow,
   uniqueTitle,
   updateNoteBodyViaDb,
+  waitForNoteSynced,
 } from "./helpers";
 
 test.beforeEach(async () => {
-  await resetRelay();
+  await resetGunPeer();
 });
 
 test("concurrent body edits merge via Loro CRDT across peers", async ({ browser }) => {
@@ -21,6 +22,7 @@ test("concurrent body edits merge via Loro CRDT across peers", async ({ browser 
   const title = uniqueTitle("CRDT merge");
   await createNote(pageA, title, "Hello world");
   await expectNoteVisible(pageA, title);
+  await waitForNoteSynced(pageA, title);
 
   await syncNow(pageB);
   await expectNoteVisible(pageB, title);
@@ -32,6 +34,8 @@ test("concurrent body edits merge via Loro CRDT across peers", async ({ browser 
   // Concurrent edits from the same base — no intervening pull of the peer's edit.
   await updateNoteBodyViaDb(pageA, noteIdA, "Hello brave world");
   await updateNoteBodyViaDb(pageB, noteIdB, "Hello world!");
+  await waitForNoteSynced(pageA, title);
+  await waitForNoteSynced(pageB, title);
 
   await syncNow(pageA);
   await syncNow(pageB);

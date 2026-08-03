@@ -1,12 +1,31 @@
 import { expect, type Browser, type BrowserContext, type Page } from "@playwright/test";
+import SEA from "gun/sea.js";
+import { IDENTITY_STORAGE_KEY, type IdentityPayload, type SeaPair } from "../src/shared/identity/types";
 
-export const RELAY_CTRL = "http://127.0.0.1:8787";
+export const GUN_PEER_CTRL = "http://127.0.0.1:8765";
 
-export async function resetRelay(): Promise<void> {
-  const res = await fetch(`${RELAY_CTRL}/test/reset`, { method: "POST" });
+export async function resetGunPeer(): Promise<void> {
+  const res = await fetch(`${GUN_PEER_CTRL}/test/reset`, { method: "POST" });
   if (!res.ok) {
-    throw new Error(`relay reset failed: ${res.status} ${await res.text()}`);
+    throw new Error(`gun peer reset failed: ${res.status} ${await res.text()}`);
   }
+}
+
+/** @deprecated Use resetGunPeer */
+export const resetRelay = resetGunPeer;
+
+export async function generateTestIdentity(): Promise<IdentityPayload> {
+  const pair = (await SEA.pair()) as SeaPair;
+  return { v: 1, pair };
+}
+
+async function injectIdentity(context: BrowserContext, identity: IdentityPayload): Promise<void> {
+  await context.addInitScript(
+    ({ key, payload }) => {
+      localStorage.setItem(key, payload);
+    },
+    { key: IDENTITY_STORAGE_KEY, payload: JSON.stringify(identity) },
+  );
 }
 
 export async function waitForNotesReady(page: Page): Promise<void> {
@@ -50,14 +69,18 @@ export async function openTwoPeers(browser: Browser): Promise<{
   contextB: BrowserContext;
   pageA: Page;
   pageB: Page;
+  identity: IdentityPayload;
 }> {
+  const identity = await generateTestIdentity();
   const contextA = await browser.newContext();
   const contextB = await browser.newContext();
+  await injectIdentity(contextA, identity);
+  await injectIdentity(contextB, identity);
   const pageA = await contextA.newPage();
   const pageB = await contextB.newPage();
   await waitForNotesReady(pageA);
   await waitForNotesReady(pageB);
-  return { contextA, contextB, pageA, pageB };
+  return { contextA, contextB, pageA, pageB, identity };
 }
 
 export async function openTwoTabs(browser: Browser): Promise<{
@@ -91,16 +114,14 @@ type DbHarness = {
 };
 
 /**
- * Polls the collection (not a shared relay counter — other parallel e2e
- * projects push to the same relay, so a global entry count is not a
- * reliable proxy for "this note's own sync cycle finished"). Needed before
- * any full page navigation: a reload's own pullRemote() can otherwise race
- * a not-yet-pushed local write and clobber it with a stale echo.
+ * Polls the collection until this note's own sync cycle finished ($synced).
+ * Needed before full page navigation: a reload's pullRemote() can otherwise
+ * race a not-yet-pushed local write.
  */
 export async function waitForNoteSynced(
   page: Page,
   title: string,
-  timeout = 15_000,
+  timeout = 30_000,
 ): Promise<string> {
   await getDb(page);
   return page.evaluate(

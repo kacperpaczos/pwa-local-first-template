@@ -67,12 +67,13 @@ test("mocked WebLLM download + summarize inference", async ({ page }) => {
     timeout: 15_000,
   });
 
-  await page.getByTestId("ai-summarize-input").fill(
-    "To jest długa notatka testowa do streszczenia przez mock WebLLM.",
-  );
+  const noteBody =
+    "To jest długa notatka testowa do streszczenia przez mock WebLLM.";
+  await page.getByTestId("ai-summarize-input").fill(noteBody);
   await page.getByTestId("ai-summarize").click();
-  await expect(page.getByTestId("ai-summary-output")).toContainText("Streszczenie:", {
-    timeout: 15_000,
-  });
+  await expect(page.getByTestId("ai-summary-output")).toHaveText(
+    `Streszczenie: ${noteBody.slice(0, 24)}`,
+    { timeout: 15_000 },
+  );
   await expect(page.getByTestId("ai-status")).toContainText("model gotowy");
 });
