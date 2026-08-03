@@ -13,12 +13,16 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:unit": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "test:e2e:install": "playwright install chromium"
+    "test:e2e:sync": "playwright test --project=chromium-sync",
+    "test:e2e:install": "playwright install chromium",
+    "test:all": "pnpm test:unit && pnpm test:e2e"
   },
   "license": "MIT",
   "dependencies": {
+    "@mlc-ai/web-llm": "^0.2.84",
     "@nanostores/solid": "^1.1.1",
     "@solidjs/router": "^1.0.0",
     "@tanstack/browser-db-sqlite-persistence": "^0.2.9",

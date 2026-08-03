@@ -4,6 +4,7 @@ import { useStore } from "@nanostores/solid";
 import { useLiveQuery } from "@tanstack/solid-db";
 import { useDb } from "@/shared/db/DbProvider";
 import type { Note } from "@/shared/db/schemas";
+import AiPanel from "@/features/ai/AiPanel";
 import {
   notesFilterStore,
   notesFormErrorStore,
@@ -68,6 +69,7 @@ const NotesPage: Component = () => {
       <p class={styles.status} data-testid="sync-status">
         Sync: {syncStatus()} · filtr: {filter()}
       </p>
+      <AiPanel />
       <div class={styles.actions} style={{ "margin-bottom": "1rem" }}>
         <button
           type="button"
@@ -118,6 +120,7 @@ const NotesPage: Component = () => {
           type="button"
           classList={{ [styles.filterActive]: filter() === "active" }}
           onClick={() => setNotesFilter("active")}
+          data-testid="filter-active"
         >
           Aktywne
         </button>
@@ -125,6 +128,7 @@ const NotesPage: Component = () => {
           type="button"
           classList={{ [styles.filterActive]: filter() === "all" }}
           onClick={() => setNotesFilter("all")}
+          data-testid="filter-all"
         >
           Wszystkie
         </button>
