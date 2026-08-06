@@ -8,7 +8,7 @@ import { importBackup, parseBackupFile } from "@/backup/import";
 import { downloadSqlDump, exportDatabaseAsSql } from "@/backup/sqlite-export";
 import { lastBackupExportAtStore, recordBackupExport } from "@/backup/status";
 import { gcTombstones } from "@/shared/sync/gc";
-import { buildCheckpoint } from "@/shared/sync/checkpoint";
+import { makeTombstoneCoverage } from "@/shared/sync/coverage";
 import { createAsyncAction } from "@/shared/lib/async-action";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -42,11 +42,7 @@ const BackupSection: Component = () => {
     try {
       const raw = await file.text();
       const backup = parseBackupFile(raw);
-      const summary = await importBackup(
-        { notes: db.notes, syncMeta: db.syncMeta },
-        db.syncMutex,
-        backup,
-      );
+      const summary = await importBackup({ notes: db.notes, store: db.store }, backup);
       setStatus(`Imported ${summary.applied}/${summary.totalInBackup} notes.`);
       toast.success("Backup imported");
     } finally {
@@ -55,8 +51,9 @@ const BackupSection: Component = () => {
   });
 
   const onRunCleanup = createAsyncAction(setBusy, setStatus, async () => {
-    const coveredSeq = buildCheckpoint(db.notes).seqCovered;
-    const removed = await gcTombstones(db.notes, coveredSeq > 0 ? { coveredSeq } : {});
+    const removed = await gcTombstones(db.notes, {
+      isCovered: makeTombstoneCoverage(() => db.oplogOps.toArray, db.engine),
+    });
     setStatus(
       removed === 0
         ? "Cleanup finished — no expired tombstones."

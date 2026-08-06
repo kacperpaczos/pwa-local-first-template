@@ -9,7 +9,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 const ConflictHistorySection: Component = () => {
-  const { facade } = useDb();
+  const { db, facade } = useDb();
+  const quarantined = () => db.store.quarantined("notes");
   const [status, setStatus] = createSignal<string | null>(null);
   const [busy, setBusy] = createSignal(false);
   const [conflictsOpen, setConflictsOpen] = createSignal(false);
@@ -100,6 +101,25 @@ const ConflictHistorySection: Component = () => {
               </For>
             </ul>
           </Show>
+        </Show>
+        <Show when={quarantined().length > 0}>
+          <Alert variant="destructive" data-testid="quarantine-list">
+            <AlertDescription>
+              <p class="mb-2 font-medium">
+                {quarantined().length} quarantined sync operation
+                {quarantined().length === 1 ? "" : "s"} (sync continues around them):
+              </p>
+              <ul class="space-y-1">
+                <For each={quarantined()}>
+                  {(op) => (
+                    <li class="font-mono text-xs">
+                      {op.device.slice(0, 8)}…#{op.seq} — {op.quarantineReason ?? "unknown"}
+                    </li>
+                  )}
+                </For>
+              </ul>
+            </AlertDescription>
+          </Alert>
         </Show>
         <Show when={status()}>
           {(message) => (

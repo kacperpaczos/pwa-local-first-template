@@ -49,7 +49,9 @@ const syncBadge: Record<
   idle: { label: "Synced", variant: "success" },
   syncing: { label: "Syncing…", variant: "secondary" },
   offline: { label: "Offline", variant: "error" },
+  locked: { label: "Locked", variant: "warning" },
   outdated: { label: "Outdated", variant: "warning" },
+  degraded: { label: "Degraded", variant: "warning" },
 };
 
 const pageTitle = (pathname: string): string => {

@@ -82,6 +82,17 @@ export type OpLogStoreOptions = {
  * - `ingest` quarantines undecodable/forked ops instead of throwing, so one
  *   poison op can never wedge the pipeline (old bug 3).
  * - The `published` flag makes the log itself the durable outbox.
+ *
+ * Reads (`head`/`heads`/`unpublished`/`unapplied`/`quarantined`/`opsSince`)
+ * are served from an in-memory index the store owns, NOT by re-querying
+ * `persistence` on every call. `persistedCollectionOptions` collections
+ * confirm a write asynchronously (a round trip through the storage
+ * coordinator) — reading `collection.toArray` immediately after `await
+ * tx.commit()` resolves can observe the row as momentarily ABSENT before it
+ * reappears a tick later. Deriving `unpublished()` from that live query right
+ * after `append()` would intermittently miss the op just written. The index
+ * is the single source of truth for reads; `persistence` is durability +
+ * (via `hydrate`) the source for restoring the index across reloads.
  */
 export class OpLogStore {
   private readonly persistence: OpLogPersistence;
@@ -89,6 +100,9 @@ export class OpLogStore {
   private readonly counter: HeadCounter | null;
   private readonly lock: ExclusiveLock;
   private readonly now: () => number;
+
+  private readonly opsByHash = new Map<string, StoredOp>();
+  private readonly headsByKey = new Map<string, HeadRow>();
 
   constructor(options: OpLogStoreOptions) {
     this.persistence = options.persistence;
@@ -106,18 +120,30 @@ export class OpLogStore {
     return this.device.deviceId;
   }
 
+  /**
+   * Populate the in-memory index from `persistence`. Call once, after the
+   * underlying collections have finished preloading — MemoryOpLogPersistence
+   * (tests) is synchronous from construction, so this is a no-op there, but
+   * a real app boot must call it explicitly (see `client.ts#startSync`).
+   */
+  hydrate(entities: readonly string[]): void {
+    for (const entity of entities) {
+      for (const op of this.persistence.listOps({ entity })) {
+        this.opsByHash.set(op.hash, op);
+      }
+      for (const head of this.persistence.listHeads(entity)) {
+        this.headsByKey.set(head.id, head);
+      }
+    }
+  }
+
   /** Sign and durably append a payload to this device's log for `entity`. */
   append(entity: string, payload: unknown): Promise<Operation> {
     return this.lock(async () => {
-      const persisted = this.persistence.getHead(entity, this.device.deviceId);
+      const head = this.headIndexed(entity, this.device.deviceId);
       const counted = this.counter?.get(entity) ?? 0;
-      const height = Math.max(persisted?.seq ?? 0, counted);
-      const backlink =
-        height === 0
-          ? null
-          : ((persisted?.seq === height
-              ? persisted.hash
-              : this.persistence.getOpAt(entity, this.device.deviceId, height)?.hash) ?? null);
+      const height = Math.max(head?.seq ?? 0, counted);
+      const backlink = height === 0 ? null : ((head?.seq === height ? head.hash : null) ?? null);
       if (height > 0 && backlink === null) {
         throw new Error(`Op log for "${entity}" is at height ${height} but the head op is missing`);
       }
@@ -133,7 +159,7 @@ export class OpLogStore {
         timestamp: this.now(),
       });
 
-      await this.persistence.putOp({
+      const row: StoredOp = {
         hash: op.hash,
         entity,
         device: this.device.deviceId,
@@ -148,8 +174,10 @@ export class OpLogStore {
         published: false,
         quarantined: false,
         quarantineReason: null,
-      });
-      await this.putHead(entity, this.device.deviceId, { seq: op.header.seq, hash: op.hash });
+      };
+      await this.persistence.putOp(row);
+      this.opsByHash.set(row.hash, row);
+      await this.setHead(entity, this.device.deviceId, { seq: op.header.seq, hash: op.hash });
       this.counter?.set(entity, op.header.seq);
       return op;
     });
@@ -164,7 +192,7 @@ export class OpLogStore {
   async ingest(op: Operation, payloadBytes: Uint8Array): Promise<IngestResult> {
     if (op.header.publicKey === this.device.deviceId) {
       // Own ops re-delivered by the mesh are never re-ingested.
-      return this.persistence.getOp(op.hash) ? "duplicate" : "invalid";
+      return this.opsByHash.has(op.hash) ? "duplicate" : "invalid";
     }
     if (!verifyOperation(op, payloadBytes)) {
       return "invalid";
@@ -172,17 +200,17 @@ export class OpLogStore {
 
     const entity = op.header.entity;
     const device = op.header.publicKey;
-    const head = this.persistence.getHead(entity, device);
+    const head = this.headIndexed(entity, device);
     const verdict = validateAgainstHead(
       op,
       head ? { seq: head.seq, hash: head.hash } : null,
-      (seq) => this.persistence.getOpAt(entity, device, seq)?.hash,
+      (seq) => this.opAtIndexed(entity, device, seq)?.hash,
     );
     if (verdict !== "ok") {
       return verdict;
     }
 
-    await this.persistence.putOp({
+    const row: StoredOp = {
       hash: op.hash,
       entity,
       device,
@@ -195,57 +223,101 @@ export class OpLogStore {
       published: true,
       quarantined: false,
       quarantineReason: null,
-    });
-    await this.putHead(entity, device, { seq: op.header.seq, hash: op.hash });
+    };
+    await this.persistence.putOp(row);
+    this.opsByHash.set(row.hash, row);
+    await this.setHead(entity, device, { seq: op.header.seq, hash: op.hash });
     return "stored";
   }
 
   head(entity: string, device: string): LogHead | null {
-    const row = this.persistence.getHead(entity, device);
+    const row = this.headIndexed(entity, device);
     return row ? { seq: row.seq, hash: row.hash } : null;
   }
 
   heads(entity: string): HeadRow[] {
-    return this.persistence.listHeads(entity);
+    return [...this.headsByKey.values()].filter((h) => h.entity === entity);
   }
 
   opsSince(entity: string, device: string, fromSeq: number): StoredOp[] {
-    return this.persistence.listOps({ entity, device, fromSeq });
+    return this.query({ entity, device, fromSeq });
   }
 
   unpublished(entity: string): StoredOp[] {
-    return this.persistence.listOps({ entity, published: false, quarantined: false });
+    return this.query({ entity, published: false, quarantined: false });
   }
 
   unapplied(entity: string): StoredOp[] {
-    return this.persistence.listOps({ entity, applied: false, quarantined: false });
+    return this.query({ entity, applied: false, quarantined: false });
   }
 
   quarantined(entity: string): StoredOp[] {
-    return this.persistence.listOps({ entity, quarantined: true });
+    return this.query({ entity, quarantined: true });
   }
 
   async markPublished(hashes: readonly string[]): Promise<void> {
     for (const hash of hashes) {
       await this.persistence.patchOp(hash, { published: true });
+      this.patchIndexed(hash, { published: true });
     }
   }
 
   async markApplied(hashes: readonly string[]): Promise<void> {
     for (const hash of hashes) {
       await this.persistence.patchOp(hash, { applied: true });
+      this.patchIndexed(hash, { applied: true });
     }
   }
 
   async quarantine(hash: string, reason: string): Promise<void> {
-    await this.persistence.patchOp(hash, {
-      quarantined: true,
-      quarantineReason: reason,
-      applied: false,
-    });
+    const patch = { quarantined: true, quarantineReason: reason, applied: false } as const;
+    await this.persistence.patchOp(hash, patch);
+    this.patchIndexed(hash, patch);
   }
 
-  private async putHead(entity: string, device: string, head: LogHead): Promise<void> {
+  private headIndexed(entity: string, device: string): HeadRow | undefined {
+    return this.headsByKey.get(headRowId(entity, device));
+  }
+
+  private opAtIndexed(entity: string, device: string, seq: number): StoredOp | undefined {
+    for (const op of this.opsByHash.values()) {
+      if (op.entity === entity && op.device === device && op.seq === seq) return op;
+    }
+    return undefined;
+  }
+
+  private query(filter: {
+    entity: string;
+    device?: string;
+    fromSeq?: number;
+    applied?: boolean;
+    published?: boolean;
+    quarantined?: boolean;
+  }): StoredOp[] {
+    const out: StoredOp[] = [];
+    for (const op of this.opsByHash.values()) {
+      if (op.entity !== filter.entity) continue;
+      if (filter.device !== undefined && op.device !== filter.device) continue;
+      if (filter.fromSeq !== undefined && op.seq < filter.fromSeq) continue;
+      if (filter.applied !== undefined && op.applied !== filter.applied) continue;
+      if (filter.published !== undefined && op.published !== filter.published) continue;
+      if (filter.quarantined !== undefined && op.quarantined !== filter.quarantined) continue;
+      out.push(op);
+    }
+    return out.sort((a, b) =>
+      a.device === b.device ? a.seq - b.seq : a.device < b.device ? -1 : 1,
+    );
+  }
+
+  private patchIndexed(
+    hash: string,
+    patch: Partial<Pick<StoredOp, "applied" | "published" | "quarantined" | "quarantineReason">>,
+  ): void {
+    const existing = this.opsByHash.get(hash);
+    if (existing) this.opsByHash.set(hash, { ...existing, ...patch });
+  }
+
+  private async setHead(entity: string, device: string, head: LogHead): Promise<void> {
     const row: HeadRow = {
       id: headRowId(entity, device),
       entity,
@@ -254,5 +326,6 @@ export class OpLogStore {
       hash: head.hash,
     };
     await this.persistence.putHead(row);
+    this.headsByKey.set(row.id, row);
   }
 }

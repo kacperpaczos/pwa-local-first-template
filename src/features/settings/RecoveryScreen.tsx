@@ -42,11 +42,7 @@ const RecoveryScreen: Component<Props> = (props) => {
     try {
       const raw = await file.text();
       const backup = parseBackupFile(raw);
-      const summary = await importBackup(
-        { notes: props.db.notes, syncMeta: props.db.syncMeta },
-        props.db.syncMutex,
-        backup,
-      );
+      const summary = await importBackup({ notes: props.db.notes, store: props.db.store }, backup);
       setStatus(`Imported ${summary.applied}/${summary.totalInBackup} notes. Refresh the page.`);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
