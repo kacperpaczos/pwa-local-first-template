@@ -59,7 +59,10 @@ describe("OpLogStore.append", () => {
     await store.append(ENTITY, { kind: "upsert", note: { id: "b" } });
 
     // "Page reload": a brand-new store instance over the same persisted state.
+    // Production calls hydrate() once collections finish preloading — tests
+    // simulate that same step explicitly.
     const reloaded = new OpLogStore({ persistence, device, headCounter: counter });
+    reloaded.hydrate([ENTITY]);
     const next = await reloaded.append(ENTITY, { kind: "upsert", note: { id: "c" } });
     expect(next.header.seq).toBe(3);
   });
@@ -152,6 +155,7 @@ describe("OpLogStore.ingest", () => {
     });
 
     const reloaded = new OpLogStore({ persistence, device, headCounter: memoryHeadCounter() });
+    reloaded.hydrate([ENTITY]);
     expect(reloaded.quarantined(ENTITY)).toHaveLength(1);
   });
 });

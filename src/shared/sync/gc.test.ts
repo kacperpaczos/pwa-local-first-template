@@ -97,7 +97,7 @@ describe("gcTombstones", () => {
     expect(await gcTombstones(notes as never, { now })).toBe(0);
   });
 
-  it("respects coveredSeq gate on deleted_lamport", async () => {
+  it("respects the isCovered gate — an unacked tombstone survives retention", async () => {
     const covered = makeNote({
       id: "covered",
       deleted_at: "2026-01-01T00:00:00.000Z",
@@ -113,7 +113,7 @@ describe("gcTombstones", () => {
     const removed = await gcTombstones(notes as never, {
       now,
       retentionMs: TOMBSTONE_RETENTION_MS,
-      coveredSeq: 10,
+      isCovered: (note) => note.id === "covered",
     });
 
     expect(removed).toBe(1);

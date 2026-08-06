@@ -1,19 +1,37 @@
-import type { Conflict, PullResult, PushResult, SyncMutation, SyncTransport } from "./transport";
+import type {
+  FetchResult,
+  HeadAnnouncement,
+  LogSyncTransport,
+  PublishableOp,
+  Unsubscribe,
+} from "./transport";
 
-/** Local-only transport — accepts everything, returns empty pulls. */
-export class NoopSyncTransport implements SyncTransport {
-  async push(outbox: readonly SyncMutation[]): Promise<PushResult> {
-    return {
-      accepted: outbox.map((m) => m.idempotencyKey),
-      rejected: [],
-    };
+/** Local-only transport — accepts every publish, observes nothing. */
+export class NoopLogTransport implements LogSyncTransport {
+  async ready(): Promise<void> {}
+
+  async publish(_entity: string, _ops: readonly PublishableOp[]): Promise<void> {}
+
+  async publishAcks(
+    _entity: string,
+    _device: string,
+    _acks: Record<string, number>,
+  ): Promise<void> {}
+
+  subscribeHeads(_entity: string, _cb: (head: HeadAnnouncement) => void): Unsubscribe {
+    return () => {};
   }
 
-  async pull(_cursor: string | null): Promise<PullResult> {
-    return { cursor: null, mutations: [] };
+  subscribeAcks(
+    _entity: string,
+    _cb: (device: string, acks: Record<string, number>) => void,
+  ): Unsubscribe {
+    return () => {};
   }
 
-  async resolve(_conflicts: readonly Conflict[]): Promise<void> {
-    // No conflicts in noop mode.
+  async fetchOps(): Promise<FetchResult> {
+    return { ops: [], sawUnsupportedVersion: false };
   }
+
+  async close(): Promise<void> {}
 }

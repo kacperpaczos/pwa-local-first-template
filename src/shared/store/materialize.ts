@@ -44,7 +44,7 @@ function foldDelete(local: Note, payload: { deleted_at: string; deleted_lamport:
   };
 }
 
-function notesEqual(a: Note, b: Note): boolean {
+export function notesEqual(a: Note, b: Note): boolean {
   return (
     a.title === b.title &&
     a.title_lamport === b.title_lamport &&

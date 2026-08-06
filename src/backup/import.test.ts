@@ -9,6 +9,7 @@ import { resetLamportForTests } from "../shared/db/lamport";
  * mutate-then-resolve, no real collection/persistence engine runs). This
  * file verifies the import/merge logic itself, not TanStack DB or OPFS
  * SQLite — those are only exercised for real in e2e (`e2e/backup.spec.ts`).
+ * The op log is REAL (OpLogStore over the in-memory persistence port).
  */
 vi.mock("@tanstack/db", () => ({
   createTransaction: ({
@@ -29,9 +30,11 @@ vi.mock("@tanstack/db", () => ({
   },
 }));
 
+import { generateDeviceKey } from "../shared/identity/device";
+import { MemoryOpLogPersistence } from "../shared/store/oplog-persistence";
+import { OpLogStore, memoryHeadCounter } from "../shared/store/oplog-store";
 import type { Backup } from "./export";
 import { importBackup, parseBackupFile } from "./import";
-import { SyncMutex } from "../shared/sync/mutex";
 
 function makeNote(partial: Partial<Note> = {}): Note {
   const body = createBodyDoc(partial.body ?? "body");
@@ -69,6 +72,14 @@ function fakeCollection<T extends { id: string }>(rows: T[] = []) {
   };
 }
 
+function makeStore() {
+  return new OpLogStore({
+    persistence: new MemoryOpLogPersistence(),
+    device: generateDeviceKey(),
+    headCounter: memoryHeadCounter(),
+  });
+}
+
 describe("parseBackupFile", () => {
   it("rejects malformed JSON", () => {
     expect(() => parseBackupFile("not json")).toThrow();
@@ -94,9 +105,9 @@ describe("importBackup", () => {
     resetLamportForTests(0);
   });
 
-  it("inserts notes missing locally", async () => {
+  it("inserts notes missing locally and appends them to the own op log", async () => {
     const notes = fakeCollection<Note>();
-    const syncMeta = fakeCollection();
+    const store = makeStore();
     const note = makeNote({ title: "from backup" });
     const backup: Backup = {
       formatVersion: 1,
@@ -104,48 +115,43 @@ describe("importBackup", () => {
       notes: [note],
     };
 
-    const summary = await importBackup(
-      { notes: notes as never, syncMeta: syncMeta as never },
-      new SyncMutex(),
-      backup,
-    );
+    const summary = await importBackup({ notes: notes as never, store }, backup);
 
     expect(summary).toEqual({ totalInBackup: 1, applied: 1 });
     expect(notes.get(note.id)?.title).toBe("from backup");
+    // The restored note is published to peers through the normal log path.
+    const pending = store.unpublished("notes");
+    expect(pending).toHaveLength(1);
+    expect(JSON.parse(pending[0]!.payloadJson)).toMatchObject({
+      kind: "upsert",
+      note: { id: note.id },
+    });
   });
 
-  it("importing the same backup twice does not duplicate or overwrite with stale data", async () => {
+  it("importing the same backup twice does not duplicate, overwrite, or re-append", async () => {
     const notes = fakeCollection<Note>();
-    const syncMeta = fakeCollection();
+    const store = makeStore();
     const note = makeNote({ title: "stable" });
     const backup: Backup = {
       formatVersion: 1,
       exportedAt: "2026-01-01T00:00:00.000Z",
       notes: [note],
     };
-    const mutex = new SyncMutex();
 
-    const first = await importBackup(
-      { notes: notes as never, syncMeta: syncMeta as never },
-      mutex,
-      backup,
-    );
+    const first = await importBackup({ notes: notes as never, store }, backup);
     expect(first.applied).toBe(1);
     expect(notes.toArray).toHaveLength(1);
 
-    const second = await importBackup(
-      { notes: notes as never, syncMeta: syncMeta as never },
-      mutex,
-      backup,
-    );
+    const second = await importBackup({ notes: notes as never, store }, backup);
     expect(second.applied).toBe(0); // merge saw identical data — no-op, not a duplicate row
     expect(notes.toArray).toHaveLength(1);
     expect(notes.get(note.id)?.title).toBe("stable");
+    expect(store.unpublished("notes")).toHaveLength(1); // still just the first append
   });
 
   it("merges an imported note against a newer local edit via per-field LWW, not overwrite", async () => {
     const notes = fakeCollection<Note>();
-    const syncMeta = fakeCollection();
+    const store = makeStore();
     const backedUp = makeNote({ title: "old title", title_lamport: 1 });
     notes.insert({ ...backedUp, title: "newer local title", title_lamport: 9 });
 
@@ -154,47 +160,8 @@ describe("importBackup", () => {
       exportedAt: "2026-01-01T00:00:00.000Z",
       notes: [backedUp],
     };
-    await importBackup(
-      { notes: notes as never, syncMeta: syncMeta as never },
-      new SyncMutex(),
-      backup,
-    );
+    await importBackup({ notes: notes as never, store }, backup);
 
     expect(notes.get(backedUp.id)?.title).toBe("newer local title");
-  });
-
-  it("waits for an in-flight sync-mutex holder before applying (no interleaving with pullRemote)", async () => {
-    const notes = fakeCollection<Note>();
-    const syncMeta = fakeCollection();
-    const note = makeNote({ title: "from backup" });
-    const backup: Backup = {
-      formatVersion: 1,
-      exportedAt: "2026-01-01T00:00:00.000Z",
-      notes: [note],
-    };
-    const mutex = new SyncMutex();
-
-    let releaseHolder!: () => void;
-    const holderDone = new Promise<void>((resolve) => {
-      releaseHolder = resolve;
-    });
-    const holding = mutex.runExclusive(() => holderDone);
-
-    const importPromise = importBackup(
-      { notes: notes as never, syncMeta: syncMeta as never },
-      mutex,
-      backup,
-    );
-
-    // While the mutex is held elsewhere, the import must not have run yet.
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(notes.get(note.id)).toBeUndefined();
-
-    releaseHolder();
-    await holding;
-    await importPromise;
-
-    expect(notes.get(note.id)?.title).toBe("from backup");
   });
 });

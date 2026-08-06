@@ -1,114 +1,63 @@
 import { describe, expect, it } from "vitest";
+import { generateDeviceKey } from "../identity/device";
+import { createOperation, verifyOperation } from "../oplog/header";
 import {
   isSupportedProtocolVersion,
-  parseSyncMutation,
+  opFromWireRow,
+  parseWireOpRow,
   PROTOCOL_VERSION,
-  ProtocolVersionError,
   SUPPORTED_MAX_V,
   SUPPORTED_MIN_V,
-  UnknownEntityError,
+  wireRowFromOp,
 } from "./protocol";
-import { createBodyDoc } from "../db/crdt";
-import { createEntityId } from "../db/ids";
-import { parseNote } from "../db/schemas";
 
-function notePayload(title = "Hello") {
-  const body = createBodyDoc("body");
-  return {
-    id: createEntityId(),
-    title,
-    title_lamport: 1,
-    body: body.text,
-    body_doc: body.doc,
-    updated_at: new Date().toISOString(),
-    deleted_at: null,
-    deleted_lamport: 0,
-  };
+const device = generateDeviceKey();
+const payload = new TextEncoder().encode(JSON.stringify({ kind: "upsert", note: { id: "n1" } }));
+
+function makeOp(seq = 1, backlink: string | null = null) {
+  return createOperation({
+    entity: "notes",
+    seq,
+    backlink,
+    payloadBytes: payload,
+    publicKey: device.publicKey,
+    secretKey: device.secretKey,
+    timestamp: 1_750_000_000_000,
+  });
 }
 
-describe("sync protocol", () => {
-  it("defaults missing v to PROTOCOL_VERSION and round-trips body_doc", () => {
-    const mutation = {
-      idempotencyKey: "k1",
-      entity: "notes" as const,
-      op: "upsert" as const,
-      payload: notePayload(),
-    };
-    const parsed = parseSyncMutation(mutation);
-    expect(parsed.v).toBe(PROTOCOL_VERSION);
-    expect(parsed.idempotencyKey).toBe("k1");
-    expect(parseNote(parsed.payload).body_doc).toBe(mutation.payload.body_doc);
+describe("wire protocol v3", () => {
+  it("bounds are exactly v3", () => {
+    expect(PROTOCOL_VERSION).toBe(3);
+    expect(isSupportedProtocolVersion(3)).toBe(true);
+    expect(isSupportedProtocolVersion(SUPPORTED_MIN_V - 1)).toBe(false);
+    expect(isSupportedProtocolVersion(SUPPORTED_MAX_V + 1)).toBe(false);
+    expect(isSupportedProtocolVersion(2.5)).toBe(false);
   });
 
-  it("accepts an explicit supported version", () => {
-    const parsed = parseSyncMutation({
-      v: PROTOCOL_VERSION,
-      idempotencyKey: "k2",
-      entity: "notes",
-      op: "upsert",
-      payload: notePayload("X"),
-    });
-    expect(parsed.v).toBe(PROTOCOL_VERSION);
+  it("round-trips an op through the wire row, signature intact", () => {
+    const op = makeOp();
+    const row = parseWireOpRow(wireRowFromOp(op, "ciphertext-blob"));
+    const back = opFromWireRow(row);
+    expect(back).toEqual(op);
+    expect(verifyOperation(back, payload)).toBe(true);
   });
 
-  it("rejects invalid mutation payloads", () => {
-    expect(() =>
-      parseSyncMutation({
-        idempotencyKey: "",
-        entity: "notes",
-        op: "upsert",
-        payload: {},
-      }),
-    ).toThrow();
+  it('encodes a null backlink as "" on the wire (Gun treats null as key deletion)', () => {
+    const genesis = makeOp();
+    expect(wireRowFromOp(genesis, "c").backlink).toBe("");
+    expect(opFromWireRow(parseWireOpRow(wireRowFromOp(genesis, "c"))).header.backlink).toBeNull();
+
+    const second = makeOp(2, genesis.hash);
+    const row = parseWireOpRow(wireRowFromOp(second, "c"));
+    expect(row.backlink).toBe(genesis.hash);
+    expect(opFromWireRow(row).header.backlink).toBe(genesis.hash);
   });
 
-  it("rejects versions outside the supported range with ProtocolVersionError", () => {
-    const tooHigh = SUPPORTED_MAX_V + 1;
-    const tooLow = SUPPORTED_MIN_V - 1;
-
-    expect(isSupportedProtocolVersion(PROTOCOL_VERSION)).toBe(true);
-    expect(isSupportedProtocolVersion(tooHigh)).toBe(false);
-    expect(isSupportedProtocolVersion(tooLow)).toBe(false);
-    expect(isSupportedProtocolVersion(1.5)).toBe(false);
-
-    expect(() =>
-      parseSyncMutation({
-        v: tooHigh,
-        idempotencyKey: "k3",
-        entity: "notes",
-        op: "upsert",
-        payload: notePayload(),
-      }),
-    ).toThrow(ProtocolVersionError);
-
-    try {
-      parseSyncMutation({
-        v: tooLow,
-        idempotencyKey: "k4",
-        entity: "notes",
-        op: "upsert",
-        payload: notePayload(),
-      });
-      expect.unreachable();
-    } catch (error) {
-      expect(error).toBeInstanceOf(ProtocolVersionError);
-      expect((error as ProtocolVersionError).version).toBe(tooLow);
-      expect((error as ProtocolVersionError).message).toMatch(/Unsupported protocol version/);
-    }
-  });
-
-  it("rejects an unregistered entity with UnknownEntityError", () => {
-    try {
-      parseSyncMutation({
-        idempotencyKey: "k5",
-        entity: "widgets",
-        op: "upsert",
-        payload: {},
-      });
-      expect.unreachable();
-    } catch (error) {
-      expect(error).toBeInstanceOf(UnknownEntityError);
-      expect((error as UnknownEntityError).entity).toBe("widgets");
-    }
+  it("rejects rows missing required fields", () => {
+    const row = wireRowFromOp(makeOp(), "c");
+    expect(() => parseWireOpRow({ ...row, hash: "" })).toThrow();
+    expect(() => parseWireOpRow({ ...row, ciphertext: "" })).toThrow();
+    expect(() => parseWireOpRow({ ...row, sig: undefined })).toThrow();
   });
 });

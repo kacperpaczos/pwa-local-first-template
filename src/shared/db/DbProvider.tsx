@@ -3,9 +3,8 @@ import { createResource } from "solid-js";
 import { PersistenceUnavailableError } from "@tanstack/db-sqlite-persistence-core";
 import { openAppDatabase, type AppDatabase } from "./client";
 import { createPersistenceFacade, type PersistenceFacade } from "./facade";
-import { setSyncStatus } from "@/shared/sync/status";
 import { gcTombstones } from "@/shared/sync/gc";
-import { buildCheckpoint } from "@/shared/sync/checkpoint";
+import { makeTombstoneCoverage } from "@/shared/sync/coverage";
 import { seedLamportFromNotes } from "./lamport";
 import { checkDatabaseIntegrity } from "@/backup/integrity";
 import { dbIntegrityStore } from "@/backup/status";
@@ -42,25 +41,30 @@ export const DbProvider: ParentComponent = (props) => {
 
     await db.offline.waitForInit();
     await db.notes.preload();
-    await db.syncMeta.preload();
+    await db.oplogOps.preload();
+    await db.oplogHeads.preload();
 
     // Seed the in-memory Lamport clock from whatever this device already
-    // has on disk, before anything (GC gating, the first pullRemote) reads
-    // or hands out a new value — otherwise a fresh page load starts the
-    // clock at 0 and could reissue a value this device already used in an
+    // has on disk, before anything (GC gating, the first sync) reads or
+    // hands out a new value — otherwise a fresh page load starts the clock
+    // at 0 and could reissue a value this device already used in an
     // earlier session.
     seedLamportFromNotes(db.notes.toArray);
 
-    // Fire-and-forget tombstone GC after a successful preload. coveredSeq
-    // comes from local note Lamport clocks (buildCheckpoint), not the
-    // transport's sync cursor — the two live in unrelated numbering spaces.
-    const coveredSeq = buildCheckpoint(db.notes).seqCovered;
-    void gcTombstones(db.notes, coveredSeq > 0 ? { coveredSeq } : {}).catch(() => {
-      /* GC is best-effort */
+    // Subscriptions + genesis publish + first sync — needs preloaded
+    // collections, which is why the engine doesn't start inside
+    // openAppDatabase.
+    void db.startSync().catch(() => {
+      /* engine recomputes status itself */
     });
 
-    void db.pullRemote().catch(() => {
-      setSyncStatus(typeof navigator !== "undefined" && !navigator.onLine ? "offline" : "idle");
+    // Fire-and-forget tombstone GC. A tombstone is only hard-deleted when
+    // every device in the roster has acked the op that recorded it — the
+    // retention window remains the backstop for devices that never return.
+    void gcTombstones(db.notes, {
+      isCovered: makeTombstoneCoverage(() => db.oplogOps.toArray, db.engine),
+    }).catch(() => {
+      /* GC is best-effort */
     });
     const facade = createPersistenceFacade(db);
     // Expose for DEV tooling and Playwright e2e (VITE_E2E=1 in the e2e build).
