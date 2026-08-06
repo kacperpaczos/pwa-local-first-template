@@ -102,9 +102,6 @@ export function readSyncCursor(syncMeta: Collection<SyncMeta, string>): string |
   return syncMeta.get(SYNC_META_ID)?.cursor ?? null;
 }
 
-/** @deprecated Use readSyncCursor */
-export const readRelayCursor = readSyncCursor;
-
 export async function writeSyncCursor(
   syncMeta: Collection<SyncMeta, string>,
   cursor: string | null,
@@ -130,9 +127,6 @@ export async function writeSyncCursor(
     });
   });
 }
-
-/** @deprecated Use writeSyncCursor */
-export const writeRelayCursor = writeSyncCursor;
 
 export function withSyncStatus<T>(fn: () => Promise<T>): Promise<T> {
   if (syncStatusStore.get() !== "outdated") {

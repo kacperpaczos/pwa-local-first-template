@@ -21,6 +21,38 @@ export type PersistenceFacade = {
   softDeleteNote: (id: string) => Promise<Note>;
 };
 
+/**
+ * Runs `mutate` inside an offline-outbox transaction and commits it. The
+ * offline executor can throw even after the mutation already landed
+ * locally (e.g. the outbox write races a concurrent sync) — `wasApplied`
+ * lets each call site check whether that happened before deciding to
+ * propagate the error, instead of every call site re-deriving its own
+ * commit/verify/rethrow dance.
+ */
+async function commitOfflineTx<T>(
+  db: AppDatabase,
+  mutate: () => void,
+  wasApplied: () => boolean,
+  result: T,
+): Promise<T> {
+  const tx = db.offline.createOfflineTransaction({
+    mutationFnName: "syncNotes",
+    autoCommit: false,
+  });
+
+  tx.mutate(mutate);
+  try {
+    await tx.commit();
+  } catch (error) {
+    if (wasApplied()) {
+      return result;
+    }
+    throw error;
+  }
+
+  return result;
+}
+
 export function createPersistenceFacade(db: AppDatabase): PersistenceFacade {
   return {
     async createNote(rawInput) {
@@ -39,24 +71,14 @@ export function createPersistenceFacade(db: AppDatabase): PersistenceFacade {
         deleted_lamport: 0,
       };
 
-      const tx = db.offline.createOfflineTransaction({
-        mutationFnName: "syncNotes",
-        autoCommit: false,
-      });
-
-      tx.mutate(() => {
-        db.notes.insert(note);
-      });
-      try {
-        await tx.commit();
-      } catch (error) {
-        if (db.notes.get(note.id)) {
-          return note;
-        }
-        throw error;
-      }
-
-      return note;
+      return commitOfflineTx(
+        db,
+        () => {
+          db.notes.insert(note);
+        },
+        () => Boolean(db.notes.get(note.id)),
+        note,
+      );
     },
 
     async updateNote(id, rawInput) {
@@ -81,31 +103,25 @@ export function createPersistenceFacade(db: AppDatabase): PersistenceFacade {
         updated_at: new Date().toISOString(),
       };
 
-      const tx = db.offline.createOfflineTransaction({
-        mutationFnName: "syncNotes",
-        autoCommit: false,
-      });
-
-      tx.mutate(() => {
-        db.notes.update(id, (draft) => {
-          draft.title = updated.title;
-          draft.title_lamport = updated.title_lamport;
-          draft.body = updated.body;
-          draft.body_doc = updated.body_doc;
-          draft.updated_at = updated.updated_at;
-        });
-      });
-      try {
-        await tx.commit();
-      } catch (error) {
-        const current = db.notes.get(id);
-        if (current && current.title_lamport === updated.title_lamport && current.body === updated.body) {
-          return updated;
-        }
-        throw error;
-      }
-
-      return updated;
+      return commitOfflineTx(
+        db,
+        () => {
+          db.notes.update(id, (draft) => {
+            draft.title = updated.title;
+            draft.title_lamport = updated.title_lamport;
+            draft.body = updated.body;
+            draft.body_doc = updated.body_doc;
+            draft.updated_at = updated.updated_at;
+          });
+        },
+        () => {
+          const current = db.notes.get(id);
+          return Boolean(
+            current && current.title_lamport === updated.title_lamport && current.body === updated.body,
+          );
+        },
+        updated,
+      );
     },
 
     async softDeleteNote(id) {
@@ -122,29 +138,18 @@ export function createPersistenceFacade(db: AppDatabase): PersistenceFacade {
         deleted_lamport: nextLamport(existing.deleted_lamport),
       };
 
-      const tx = db.offline.createOfflineTransaction({
-        mutationFnName: "syncNotes",
-        autoCommit: false,
-      });
-
-      tx.mutate(() => {
-        db.notes.update(id, (draft) => {
-          draft.deleted_at = updated.deleted_at;
-          draft.updated_at = updated.updated_at;
-          draft.deleted_lamport = updated.deleted_lamport;
-        });
-      });
-      try {
-        await tx.commit();
-      } catch (error) {
-        const current = db.notes.get(id);
-        if (current?.deleted_at) {
-          return updated;
-        }
-        throw error;
-      }
-
-      return updated;
+      return commitOfflineTx(
+        db,
+        () => {
+          db.notes.update(id, (draft) => {
+            draft.deleted_at = updated.deleted_at;
+            draft.updated_at = updated.updated_at;
+            draft.deleted_lamport = updated.deleted_lamport;
+          });
+        },
+        () => Boolean(db.notes.get(id)?.deleted_at),
+        updated,
+      );
     },
   };
 }

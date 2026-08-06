@@ -18,8 +18,8 @@ type Props = {
 
 /**
  * Shown instead of a white screen when `PRAGMA integrity_check` fails at
- * startup (Etap 4.0). Offers the two ways out: export whatever rows are
- * still readable, or restore from a previously downloaded backup file.
+ * startup. Offers the two ways out: export whatever rows are still
+ * readable, or restore from a previously downloaded backup file.
  */
 const RecoveryScreen: Component<Props> = (props) => {
   const [status, setStatus] = createSignal<string | null>(null);

@@ -3,7 +3,7 @@ import type { Note } from "../db/schemas";
 import { createBodyDoc } from "../db/crdt";
 import { createEntityId } from "../db/ids";
 import { resetLamportForTests } from "../db/lamport";
-import { RELAY_SYNC_META_ID, type SyncMeta } from "../db/sync-meta";
+import { SYNC_META_ID, type SyncMeta } from "../db/sync-meta";
 
 /**
  * `@tanstack/db` is fully mocked below (transactions become a trivial
@@ -32,8 +32,8 @@ vi.mock("@tanstack/db", () => ({
 
 import {
   applyRemoteMutations,
-  readRelayCursor,
-  writeRelayCursor,
+  readSyncCursor,
+  writeSyncCursor,
 } from "./apply-remote";
 
 function makeNote(partial: Partial<Note> = {}): Note {
@@ -125,15 +125,15 @@ describe("applyRemoteMutations", () => {
     expect(second).toBe(0);
   });
 
-  it("writes and reads the relay cursor via sync_meta", async () => {
+  it("writes and reads the sync cursor via sync_meta", async () => {
     const syncMeta = fakeCollection<SyncMeta>();
-    expect(readRelayCursor(syncMeta as never)).toBeNull();
+    expect(readSyncCursor(syncMeta as never)).toBeNull();
 
-    await writeRelayCursor(syncMeta as never, "7");
-    expect(readRelayCursor(syncMeta as never)).toBe("7");
-    expect(syncMeta.get(RELAY_SYNC_META_ID)?.cursor).toBe("7");
+    await writeSyncCursor(syncMeta as never, "7");
+    expect(readSyncCursor(syncMeta as never)).toBe("7");
+    expect(syncMeta.get(SYNC_META_ID)?.cursor).toBe("7");
 
-    await writeRelayCursor(syncMeta as never, "8");
-    expect(readRelayCursor(syncMeta as never)).toBe("8");
+    await writeSyncCursor(syncMeta as never, "8");
+    expect(readSyncCursor(syncMeta as never)).toBe("8");
   });
 });

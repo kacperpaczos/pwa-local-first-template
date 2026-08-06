@@ -1,6 +1,7 @@
 import * as z from "zod/mini";
 import type { Collection } from "@tanstack/db";
 import { noteSchema, type Note } from "@/shared/db/schemas";
+import { triggerDownload } from "@/shared/lib/download";
 
 export const BACKUP_FORMAT_VERSION = 1;
 
@@ -36,17 +37,9 @@ export function backupFileName(at: Date = new Date()): string {
 
 /** Browser-only: triggers a file download for the serialized backup. */
 export function downloadBackupFile(backup: Backup): void {
-  if (typeof document === "undefined") {
-    throw new Error("downloadBackupFile requires a browser environment");
-  }
-  const blob = new Blob([serializeBackup(backup)], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  try {
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = backupFileName(new Date(backup.exportedAt));
-    anchor.click();
-  } finally {
-    URL.revokeObjectURL(url);
-  }
+  triggerDownload(
+    serializeBackup(backup),
+    backupFileName(new Date(backup.exportedAt)),
+    "application/json",
+  );
 }

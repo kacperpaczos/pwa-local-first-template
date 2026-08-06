@@ -19,13 +19,6 @@ export type StoredCheckpoint = {
   sealed: SealedBlob;
 };
 
-/** Parse a sync cursor string (Gun seq) to a finite number, else 0. */
-export function parseSyncCursorSeq(cursor: string | null | undefined): number {
-  if (cursor == null || cursor === "") return 0;
-  const n = Number(cursor);
-  return Number.isFinite(n) ? n : 0;
-}
-
 function maxNoteLamport(notes: readonly Note[]): number {
   let max = 0;
   for (const note of notes) {
@@ -42,16 +35,17 @@ function asNoteArray(notes: Collection<Note, string> | readonly Note[]): Note[] 
 }
 
 /**
- * Build a checkpoint snapshot. `seqCovered` is the max of the parsed sync
- * cursor (when provided) and all note Lamport clocks.
+ * Build a checkpoint snapshot. `seqCovered` is the max Lamport clock across
+ * all local notes — the transport's sync cursor lives in a separate,
+ * per-origin numbering (see GunSyncTransport) and is not comparable to note
+ * Lamport clocks, so it deliberately does not feed into this value.
  */
 export function buildCheckpoint(
   notes: Collection<Note, string> | readonly Note[],
-  options: { cursor?: string | null; now?: Date } = {},
+  options: { now?: Date } = {},
 ): Checkpoint {
   const parsed = asNoteArray(notes);
-  const cursorSeq = parseSyncCursorSeq(options.cursor);
-  const seqCovered = Math.max(cursorSeq, maxNoteLamport(parsed));
+  const seqCovered = maxNoteLamport(parsed);
   return {
     seqCovered,
     exportedAt: (options.now ?? new Date()).toISOString(),

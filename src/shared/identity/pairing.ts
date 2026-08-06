@@ -1,4 +1,5 @@
 import { exportSpaceKey, importSpaceKey } from "@/shared/crypto/envelope";
+import { parseJsonOrThrow } from "@/shared/lib/json";
 import { ensurePair, savePair } from "./pair";
 import { ensureSpace, saveSpaceExported } from "./space";
 import type { SeaPair } from "./types";
@@ -86,34 +87,53 @@ export function parsePairingPayload(raw: unknown): PairingPayload {
 }
 
 export function parsePairingJson(text: string): PairingPayload {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text) as unknown;
-  } catch {
-    throw new Error("Pairing JSON is not valid");
-  }
-  return parsePairingPayload(parsed);
+  return parsePairingPayload(parseJsonOrThrow(text, "Pairing JSON is not valid"));
 }
 
 /**
- * Import SEA pair + space key from a pairing payload.
- * Verifies SAS when `expectedSas` is provided (optional remote check).
+ * Parse + structurally validate a pairing payload and compute its SAS,
+ * WITHOUT touching storage. `payload.sasDigits` is self-derived from data
+ * inside the same payload (spaceId + pub), so this only catches corruption
+ * / typos in transit — it does NOT authenticate the sender. Callers must
+ * show the returned SAS to the user and get an out-of-band confirmation
+ * (the code read from the other device) before calling
+ * {@link commitPairingPayload} — see its doc comment for why that step is
+ * the one that actually matters.
  */
-export async function importPairingPayload(
+export async function previewPairingPayload(
   raw: string | PairingPayload,
-  storage: Pick<Storage, "setItem"> = localStorage,
-  expectedSas?: string,
 ): Promise<PairingPayload> {
   const payload = typeof raw === "string" ? parsePairingJson(raw) : parsePairingPayload(raw);
 
-  // Validate key material before persisting.
+  // Validate key material shape without persisting it.
   await importSpaceKey(payload.spaceKey);
 
   const expectedDigits = await deriveSasDigits(payload.spaceId, [payload.pair.pub]);
   if (payload.sasDigits !== expectedDigits) {
     throw new Error("SAS digits do not match space identity");
   }
-  if (expectedSas !== undefined && !verifySas(expectedDigits, expectedSas)) {
+
+  return payload;
+}
+
+/**
+ * Persist a previewed pairing payload's SEA pair + space key locally.
+ *
+ * `expectedSas` is required and MUST come from the user manually reading it
+ * off the other, genuine device (voice, in person, etc — any channel an
+ * attacker substituting the QR/JSON in transit doesn't also control). This
+ * is the actual security boundary: `payload.sasDigits` is computed purely
+ * from data the sender of the payload controls, so an attacker crafting a
+ * whole fake payload (fake pair + fake spaceId) trivially produces one that
+ * is internally self-consistent — {@link previewPairingPayload} alone
+ * cannot detect that. Only a human confirming the SAS out-of-band can.
+ */
+export async function commitPairingPayload(
+  payload: PairingPayload,
+  expectedSas: string,
+  storage: Pick<Storage, "setItem"> = localStorage,
+): Promise<PairingPayload> {
+  if (!verifySas(payload.sasDigits, expectedSas)) {
     throw new Error("SAS verification failed");
   }
 

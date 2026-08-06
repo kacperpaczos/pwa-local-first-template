@@ -11,6 +11,7 @@ export {
   savePair,
 } from "./pair";
 export { identityToQrDataUrl, pairingToQrDataUrl } from "./qr";
+export { ORIGIN_STORAGE_KEY, ensureOriginId } from "./origin";
 export {
   IDENTITY_STORAGE_KEY,
   type IdentityPayload,
@@ -45,9 +46,10 @@ export {
 } from "./recovery";
 export {
   buildPairingPayload,
+  commitPairingPayload,
   deriveSasDigits,
   exportPairingJson,
-  importPairingPayload,
+  previewPairingPayload,
   parsePairingJson,
   parsePairingPayload,
   verifySas,
