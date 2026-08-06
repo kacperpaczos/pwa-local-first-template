@@ -17,8 +17,7 @@ describe("initAiFeature (real config + real gpu detection)", () => {
     vi.unstubAllEnvs();
   });
 
-  it("is unavailable when VITE_AI_ENABLED=false, even with navigator.gpu present", async () => {
-    vi.stubEnv("VITE_AI_ENABLED", "false");
+  it("is unavailable when VITE_AI_ENABLED is unset (opt-in), even with navigator.gpu present", async () => {
     vi.stubGlobal("navigator", { gpu: {} });
 
     const { initAiFeature } = await import("./index");
@@ -26,6 +25,7 @@ describe("initAiFeature (real config + real gpu detection)", () => {
   });
 
   it("is unavailable when the flag is on but navigator.gpu is absent", async () => {
+    vi.stubEnv("VITE_AI_ENABLED", "true");
     vi.stubGlobal("navigator", {});
 
     const { initAiFeature } = await import("./index");
@@ -33,6 +33,7 @@ describe("initAiFeature (real config + real gpu detection)", () => {
   });
 
   it("is available when the flag is on and navigator.gpu is present", async () => {
+    vi.stubEnv("VITE_AI_ENABLED", "true");
     vi.stubGlobal("navigator", { gpu: {} });
 
     const { initAiFeature } = await import("./index");
@@ -40,6 +41,7 @@ describe("initAiFeature (real config + real gpu detection)", () => {
   });
 
   it("writes the resolved status into aiStatusStore, not just the return value", async () => {
+    vi.stubEnv("VITE_AI_ENABLED", "true");
     vi.stubGlobal("navigator", { gpu: {} });
 
     const { initAiFeature } = await import("./index");
@@ -49,6 +51,7 @@ describe("initAiFeature (real config + real gpu detection)", () => {
   });
 
   it("keeps AI available and stores headroom when free space is low", async () => {
+    vi.stubEnv("VITE_AI_ENABLED", "true");
     vi.stubGlobal("navigator", {
       gpu: {},
       storage: {

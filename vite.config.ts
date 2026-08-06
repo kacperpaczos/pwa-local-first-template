@@ -21,7 +21,7 @@ export default defineConfig({
     solidPlugin(),
     moduleExclude("text-encoding"),
     VitePWA({
-      registerType: "autoUpdate",
+      registerType: "prompt",
       includeAssets: ["favicon.svg", "apple-touch-icon.png"],
       manifest: {
         name: "pwa-local-first-template",
