@@ -1,14 +1,34 @@
-import { defineConfig } from "vitest/config";
 import { fileURLToPath, URL } from "node:url";
+import solid from "vite-plugin-solid";
+import { defineConfig } from "vitest/config";
+
+const alias = {
+  "@": fileURLToPath(new URL("./src", import.meta.url)),
+};
 
 export default defineConfig({
-  resolve: {
-    alias: {
-      "@": fileURLToPath(new URL("./src", import.meta.url)),
-    },
-  },
   test: {
-    environment: "node",
-    include: ["src/**/*.{test,spec}.ts", "server/**/*.{test,spec}.ts"],
+    projects: [
+      {
+        resolve: { alias },
+        test: {
+          name: "unit",
+          environment: "node",
+          include: ["src/**/*.{test,spec}.ts", "server/**/*.{test,spec}.ts"],
+        },
+      },
+      {
+        plugins: [solid()],
+        // Solid must resolve its client (browser) build under jsdom, or
+        // components throw "client-only API called on the server".
+        resolve: { alias, conditions: ["development", "browser"] },
+        test: {
+          name: "dom",
+          environment: "jsdom",
+          include: ["src/**/*.{test,spec}.tsx"],
+          setupFiles: ["./vitest.setup.dom.ts"],
+        },
+      },
+    ],
   },
 });
