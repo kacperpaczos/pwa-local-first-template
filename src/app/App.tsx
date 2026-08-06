@@ -5,6 +5,7 @@ import { DbProvider } from "@/shared/db/DbProvider";
 import { initAiFeature } from "@/ai";
 import AppShell from "./AppShell";
 import { AppRoutes } from "./routes";
+import AppErrorBoundary from "./AppErrorBoundary";
 
 const THEME_STORAGE_KEY = "pwa-ui-theme";
 
@@ -17,11 +18,13 @@ const App: Component = () => {
 
   return (
     <ColorModeProvider storageManager={storageManager}>
-      <DbProvider>
-        <Router root={RootLayout}>
-          <AppRoutes />
-        </Router>
-      </DbProvider>
+      <AppErrorBoundary>
+        <DbProvider>
+          <Router root={RootLayout}>
+            <AppRoutes />
+          </Router>
+        </DbProvider>
+      </AppErrorBoundary>
     </ColorModeProvider>
   );
 };
