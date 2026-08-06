@@ -5,7 +5,21 @@ import App from "@/app/App";
 
 if (import.meta.env.VITE_E2E !== "1") {
   void import("virtual:pwa-register").then(({ registerSW }) => {
-    registerSW({ immediate: true });
+    const updateSW = registerSW({
+      immediate: true,
+      onNeedRefresh() {
+        void import("solid-sonner").then(({ toast }) => {
+          toast("Update available", {
+            description: "A new version of the app is ready.",
+            duration: Number.POSITIVE_INFINITY,
+            action: {
+              label: "Reload",
+              onClick: () => void updateSW(true),
+            },
+          });
+        });
+      },
+    });
   });
 }
 

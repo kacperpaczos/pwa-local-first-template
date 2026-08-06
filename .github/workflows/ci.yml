@@ -4,9 +4,50 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    # Weekly canary against dependency drift (several deps are pre-1.0).
+    - cron: "17 6 * * 1"
 
 jobs:
-  test:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Lint + format (Biome)
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Unit + component tests with coverage
+        run: pnpm vitest run --coverage
+
+      - name: Coverage summary
+        if: always()
+        run: |
+          if [ -f coverage/coverage-summary.json ]; then
+            node -e "const s=require('./coverage/coverage-summary.json').total; console.log('lines ' + s.lines.pct + '% | branches ' + s.branches.pct + '% | functions ' + s.functions.pct + '%')" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # This is a clean production build (no VITE_E2E) — the e2e job's build
+      # bakes VITE_E2E=1, so it cannot be reused for this guard.
+      - name: Production build must not ship e2e-only identity hooks
+        run: pnpm build && pnpm check:no-e2e-hooks
+
+  e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -26,8 +67,5 @@ jobs:
       - name: Install Playwright Chromium
         run: pnpm exec playwright install chromium --with-deps
 
-      - name: Typecheck + unit + e2e
-        run: pnpm typecheck && pnpm test:all
-
-      - name: Production build must not ship e2e-only identity hooks
-        run: pnpm build && pnpm check:no-e2e-hooks
+      - name: E2E (Chromium)
+        run: pnpm test:e2e

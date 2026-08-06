@@ -8,6 +8,12 @@ const alias = {
 
 export default defineConfig({
   test: {
+    coverage: {
+      provider: "v8",
+      reporter: ["text-summary", "json-summary"],
+      include: ["src/**", "server/**"],
+      exclude: ["src/components/ui/**", "src/**/*.test.*", "e2e/**"],
+    },
     projects: [
       {
         resolve: { alias },
