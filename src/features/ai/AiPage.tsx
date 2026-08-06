@@ -1,19 +1,8 @@
-import { For, Show, createMemo, createSignal, onCleanup, onMount, type Component } from "solid-js";
+import { createMemo, createSignal, onCleanup, onMount, Show, type Component } from "solid-js";
 import { useStore } from "@nanostores/solid";
 import { useLiveQuery } from "@tanstack/solid-db";
+import { Bot, HelpCircle, MessageSquare, Sparkles } from "lucide-solid";
 import {
-  Bot,
-  Download,
-  Eraser,
-  HelpCircle,
-  Loader2,
-  MessageSquare,
-  Sparkles,
-  Trash2,
-  X,
-} from "lucide-solid";
-import {
-  AI_TIER_MODELS,
   detectHardware,
   downloadAiModel,
   getAiProvider,
@@ -40,28 +29,18 @@ import {
 } from "@/ai";
 import { useDb } from "@/shared/db/DbProvider";
 import type { Note } from "@/shared/db/schemas";
+import { createAsyncAction } from "@/shared/lib/async-action";
 import PageHeader from "@/components/PageHeader";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  TextField,
-  TextFieldLabel,
-  TextFieldTextArea,
-} from "@/components/ui/text-field";
-
-type ChatTurn = { role: "user" | "assistant"; text: string };
+import ModelPanel from "./ModelPanel";
+import ChatPanel, { type ChatTurn } from "./ChatPanel";
+import SummarizePanel from "./SummarizePanel";
+import QaPanel from "./QaPanel";
+import AgentPanel from "./AgentPanel";
 
 function label(status: AiStatus): string {
   switch (status.kind) {
@@ -80,9 +59,7 @@ function label(status: AiStatus): string {
     case "error":
       return `error: ${status.reason}`;
     case "unavailable":
-      return status.reason === "no-webgpu"
-        ? "unavailable (WebGPU required)"
-        : "unavailable";
+      return status.reason === "no-webgpu" ? "unavailable (WebGPU required)" : "unavailable";
   }
 }
 
@@ -135,14 +112,10 @@ const AiPage: Component = () => {
   });
 
   const [recommendedTier, setRecommendedTier] = createSignal<AiTier>("std");
-  const [selectedTier, setSelectedTier] = createSignal<AiTier>(
-    getPersistedAiTier() ?? "std",
-  );
+  const [selectedTier, setSelectedTier] = createSignal<AiTier>(getPersistedAiTier() ?? "std");
   const [hwReady, setHwReady] = createSignal(false);
   const activeModelId = createMemo(() => resolveAiModelId(selectedTier()));
-  const activeModelSize = createMemo(() =>
-    sizeLabel(resolveAiModelApproxBytes(selectedTier())),
-  );
+  const activeModelSize = createMemo(() => sizeLabel(resolveAiModelApproxBytes(selectedTier())));
   const forcingAboveRecommend = createMemo(() => {
     const order: AiTier[] = ["dev", "std", "max"];
     return order.indexOf(selectedTier()) > order.indexOf(recommendedTier());
@@ -150,9 +123,7 @@ const AiPage: Component = () => {
 
   const skills = listSkills().filter((s) => s.enabled);
   const [skillId, setSkillId] = createSignal(skills[0]?.id ?? "strict-qa");
-  const selectedSkill = createMemo(
-    (): Skill | undefined => skills.find((s) => s.id === skillId()) ?? skills[0],
-  );
+  const selectedSkill = createMemo((): Skill | undefined => skills.find((s) => s.id === skillId()) ?? skills[0]);
 
   const [input, setInput] = createSignal("");
   const [summary, setSummary] = createSignal("");
@@ -191,68 +162,63 @@ const AiPage: Component = () => {
     void refreshAiCacheStatus(tier);
   };
 
-  const onDownload = async () => {
-    setActionError(null);
-    const controller = new AbortController();
-    setDownloadAbort(controller);
-    setPending(true);
-    try {
-      await downloadAiModel(controller.signal, selectedTier());
-    } catch (error) {
-      if (!(error instanceof DOMException && error.name === "AbortError")) {
-        setActionError(friendlyError(error));
+  const onDownload = createAsyncAction(
+    setPending,
+    setActionError,
+    async () => {
+      const controller = new AbortController();
+      setDownloadAbort(controller);
+      try {
+        await downloadAiModel(controller.signal, selectedTier());
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === "AbortError")) {
+          throw error;
+        }
+      } finally {
+        setDownloadAbort(null);
       }
-    } finally {
-      setDownloadAbort(null);
-      setPending(false);
-    }
-  };
+    },
+    friendlyError,
+  );
 
   const onCancelDownload = () => {
     downloadAbort()?.abort();
   };
 
-  const onUnload = async () => {
-    setActionError(null);
-    setPending(true);
-    try {
+  const onUnload = createAsyncAction(
+    setPending,
+    setActionError,
+    async () => {
       await unloadAiModel();
       setSummary("");
       setRagAnswer("");
       setAgentAnswer("");
       setPendingWrite(null);
-    } catch (error) {
-      setActionError(friendlyError(error));
-    } finally {
-      setPending(false);
-    }
-  };
+    },
+    friendlyError,
+  );
 
-  const onClearCache = async () => {
-    setActionError(null);
-    setCacheMessage(null);
-    setPending(true);
-    try {
+  const onClearCache = createAsyncAction(
+    setPending,
+    setActionError,
+    async () => {
       const result = await clearAiModelCache();
       setCacheMessage(result.detail);
       if (!result.cleared) {
         setActionError(result.detail);
       }
-    } catch (error) {
-      setActionError(friendlyError(error));
-    } finally {
-      setPending(false);
-    }
-  };
+    },
+    friendlyError,
+  );
 
-  const onChat = async () => {
-    const question = input().trim();
-    if (!question) return;
-    setActionError(null);
-    setInput("");
-    setTurns((prev) => [...prev, { role: "user", text: question }, { role: "assistant", text: "" }]);
-    setPending(true);
-    try {
+  const onChat = createAsyncAction(
+    setPending,
+    setActionError,
+    async () => {
+      const question = input().trim();
+      if (!question) return;
+      setInput("");
+      setTurns((prev) => [...prev, { role: "user", text: question }, { role: "assistant", text: "" }]);
       const text = await chatWithAi(question, (chunk) => {
         setTurns((prev) => {
           const next = prev.slice();
@@ -271,65 +237,48 @@ const AiPage: Component = () => {
         }
         return next;
       });
-    } catch (error) {
-      setActionError(friendlyError(error));
-    } finally {
-      setPending(false);
-    }
-  };
+    },
+    friendlyError,
+  );
 
-  const onSummarize = async () => {
-    setActionError(null);
-    setSummary("");
-    setPending(true);
-    try {
+  const onSummarize = createAsyncAction(
+    setPending,
+    setActionError,
+    async () => {
+      setSummary("");
       const text = await summarizeWithAi(input(), (chunk) => {
         setSummary((prev) => prev + chunk);
       });
       setSummary(text);
-    } catch (error) {
-      setActionError(friendlyError(error));
-    } finally {
-      setPending(false);
-    }
-  };
+    },
+    friendlyError,
+  );
 
-  const onAskNotes = async () => {
-    const question = input().trim();
-    if (!question) return;
-    setActionError(null);
-    setRagAnswer("");
-    setPending(true);
-    try {
-      const notes = activeNotes().map((n) => ({
-        id: n.id,
-        title: n.title,
-        body: n.body,
-      }));
+  const onAskNotes = createAsyncAction(
+    setPending,
+    setActionError,
+    async () => {
+      const question = input().trim();
+      if (!question) return;
+      setRagAnswer("");
+      const notes = activeNotes().map((n) => ({ id: n.id, title: n.title, body: n.body }));
       const text = await answerWithRag(question, notes, (chunk) => {
         setRagAnswer((prev) => prev + chunk);
       });
       setRagAnswer(text);
-    } catch (error) {
-      setActionError(friendlyError(error));
-    } finally {
-      setPending(false);
-    }
-  };
+    },
+    friendlyError,
+  );
 
-  const onAgentRun = async () => {
-    const question = input().trim();
-    if (!question) return;
-    setActionError(null);
-    setAgentAnswer("");
-    setPendingWrite(null);
-    setPending(true);
-    try {
-      const notes = activeNotes().map((n) => ({
-        id: n.id,
-        title: n.title,
-        body: n.body,
-      }));
+  const onAgentRun = createAsyncAction(
+    setPending,
+    setActionError,
+    async () => {
+      const question = input().trim();
+      if (!question) return;
+      setAgentAnswer("");
+      setPendingWrite(null);
+      const notes = activeNotes().map((n) => ({ id: n.id, title: n.title, body: n.body }));
       const result = await runAgentTurn({
         question,
         notes,
@@ -338,19 +287,16 @@ const AiPage: Component = () => {
       });
       setAgentAnswer(result.answer);
       setPendingWrite(result.pendingWrite ?? null);
-    } catch (error) {
-      setActionError(friendlyError(error));
-    } finally {
-      setPending(false);
-    }
-  };
+    },
+    friendlyError,
+  );
 
-  const onConfirmWrite = async () => {
-    const pw = pendingWrite();
-    if (!pw) return;
-    setActionError(null);
-    setPending(true);
-    try {
+  const onConfirmWrite = createAsyncAction(
+    setPending,
+    setActionError,
+    async () => {
+      const pw = pendingWrite();
+      if (!pw) return;
       if (pw.tool === "create_note") {
         const title = String(pw.args.title ?? "");
         const body = typeof pw.args.body === "string" ? pw.args.body : "";
@@ -363,12 +309,9 @@ const AiPage: Component = () => {
         setAgentAnswer((prev) => `${prev}\n\n✓ Title updated.`);
       }
       setPendingWrite(null);
-    } catch (error) {
-      setActionError(friendlyError(error));
-    } finally {
-      setPending(false);
-    }
-  };
+    },
+    friendlyError,
+  );
 
   const onCancelWrite = () => {
     setPendingWrite(null);
@@ -387,9 +330,7 @@ const AiPage: Component = () => {
         fallback={
           <Alert data-testid="ai-unavailable">
             <AlertTitle>AI unavailable</AlertTitle>
-            <AlertDescription>
-              On-device AI needs WebGPU. Notes still work without it.
-            </AlertDescription>
+            <AlertDescription>On-device AI needs WebGPU. Notes still work without it.</AlertDescription>
           </Alert>
         }
       >
@@ -404,164 +345,28 @@ const AiPage: Component = () => {
             </Badge>
           </CardHeader>
           <CardContent class="space-y-4">
-            <div
-              class="space-y-3 rounded-md border bg-muted/20 p-3 text-sm"
-              data-testid="ai-tier-panel"
-            >
-              <div class="flex flex-wrap items-center gap-2">
-                <span class="font-medium">Hardware tier</span>
-                <Show when={hwReady()}>
-                  <Badge variant="outline" data-testid="ai-tier-recommended">
-                    Recommended: {AI_TIER_MODELS[recommendedTier()].label}
-                  </Badge>
-                </Show>
-              </div>
-              <div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap" data-testid="ai-tier-select">
-                <For each={(["max", "std", "dev"] as AiTier[])}>
-                  {(tier) => (
-                    <Button
-                      size="sm"
-                      variant={selectedTier() === tier ? "default" : "outline"}
-                      data-testid={`ai-tier-${tier}`}
-                      disabled={pending() || status().kind === "busy" || status().kind === "downloading"}
-                      onClick={() => onTierChange(tier)}
-                    >
-                      {AI_TIER_MODELS[tier].label}
-                      <Show when={tier === recommendedTier()}>
-                        <span class="ml-1 text-xs opacity-70">(rec.)</span>
-                      </Show>
-                    </Button>
-                  )}
-                </For>
-              </div>
-              <Show when={forcingAboveRecommend()}>
-                <Alert data-testid="ai-tier-warning">
-                  <AlertTitle>Override</AlertTitle>
-                  <AlertDescription>
-                    {AI_TIER_MODELS[selectedTier()].label} may fail to load on this device. Prefer{" "}
-                    {AI_TIER_MODELS[recommendedTier()].label} if download or inference crashes.
-                  </AlertDescription>
-                </Alert>
-              </Show>
-            </div>
-
-            <Show when={canLoad()}>
-              <div
-                class="space-y-2 rounded-md border bg-muted/20 p-3 text-sm"
-                data-testid="ai-consent"
-              >
-                <p>
-                  <span class="font-medium">Model:</span>{" "}
-                  <code class="text-xs" data-testid="ai-model-id">
-                    {activeModelId()}
-                  </code>
-                </p>
-                <p data-testid="ai-model-size">
-                  <span class="font-medium">Approximate size:</span> {activeModelSize()}
-                </p>
-                <p class="text-muted-foreground" data-testid="ai-privacy-note">
-                  Runs offline — your notes and prompts stay on this device.
-                </p>
-                <Show when={lowStorage()}>
-                  <Alert variant="destructive" data-testid="ai-storage-warning">
-                    <AlertTitle>Low storage</AlertTitle>
-                    <AlertDescription>
-                      This browser may not have enough free space for a {activeModelSize()}{" "}
-                      download. Free some space, or continue if you know the model is already
-                      cached.
-                    </AlertDescription>
-                  </Alert>
-                </Show>
-              </div>
-            </Show>
-
-            <div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-              <Show when={canLoad()}>
-                <Button
-                  class="w-full sm:w-auto"
-                  data-testid="ai-download"
-                  disabled={pending()}
-                  onClick={() => void onDownload()}
-                >
-                  <Show when={pending()} fallback={<Download class="size-4" />}>
-                    <Loader2 class="size-4 animate-spin" />
-                  </Show>
-                  {loadLabel()}
-                </Button>
-              </Show>
-              <Show when={downloading()}>
-                <Button
-                  class="w-full sm:w-auto"
-                  variant="outline"
-                  data-testid="ai-download-cancel"
-                  onClick={onCancelDownload}
-                >
-                  <X class="size-4" />
-                  Cancel
-                </Button>
-              </Show>
-              <Show when={modelReady() || status().kind === "error"}>
-                <Button
-                  class="w-full sm:w-auto"
-                  variant="outline"
-                  data-testid="ai-unload"
-                  disabled={pending() || status().kind === "busy"}
-                  onClick={() => void onUnload()}
-                >
-                  <Trash2 class="size-4" />
-                  Unload model
-                </Button>
-              </Show>
-              <Button
-                class="w-full sm:w-auto"
-                variant="outline"
-                data-testid="ai-clear-cache"
-                disabled={pending() || status().kind === "busy" || status().kind === "downloading"}
-                onClick={() => void onClearCache()}
-              >
-                <Eraser class="size-4" />
-                Clear model cache
-              </Button>
-            </div>
-
-            <Show
-              when={(() => {
-                const s = status();
-                return s.kind === "available" && s.cached ? s : undefined;
-              })()}
-            >
-              <p class="text-sm text-muted-foreground">
-                Weights are already saved in this browser. Load only puts them into GPU memory for
-                this session.
-              </p>
-            </Show>
-
-            <Show when={downloading()}>
-              {(s) => (
-                <Progress value={Math.round(s().progress * 100)} data-testid="ai-download-progress" />
-              )}
-            </Show>
-
-            <div
-              class="rounded-md border bg-muted/20 p-3 text-sm"
-              data-testid="ai-telemetry"
-            >
-              <p class="font-medium">Local telemetry</p>
-              <p class="text-muted-foreground">
-                Inferences: {telemetry().inferCount} · Errors: {telemetry().errorCount} · Last:{" "}
-                {telemetry().lastMs == null ? "—" : `${telemetry().lastMs} ms`}
-              </p>
-              <p class="mt-1 text-xs text-muted-foreground">
-                Model unloads from GPU after 10 minutes of inactivity. Cached weights stay on disk
-                until you clear the cache.
-              </p>
-            </div>
-
-            <Show when={cacheMessage()}>
-              <Alert data-testid="ai-cache-message">
-                <AlertDescription>{cacheMessage()}</AlertDescription>
-              </Alert>
-            </Show>
+            <ModelPanel
+              status={status}
+              hwReady={hwReady}
+              recommendedTier={recommendedTier}
+              selectedTier={selectedTier}
+              onTierChange={onTierChange}
+              forcingAboveRecommend={forcingAboveRecommend}
+              canLoad={canLoad}
+              activeModelId={activeModelId}
+              activeModelSize={activeModelSize}
+              lowStorage={lowStorage}
+              pending={pending}
+              onDownload={() => void onDownload()}
+              loadLabel={loadLabel}
+              downloading={downloading}
+              onCancelDownload={onCancelDownload}
+              modelReady={modelReady}
+              onUnload={() => void onUnload()}
+              onClearCache={() => void onClearCache()}
+              telemetry={telemetry}
+              cacheMessage={cacheMessage}
+            />
 
             <Show when={modelReady()}>
               <Tabs defaultValue="chat">
@@ -585,192 +390,55 @@ const AiPage: Component = () => {
                 </TabsList>
 
                 <TabsContent value="chat" class="space-y-3">
-                  <div
-                    class="max-h-72 space-y-3 overflow-auto rounded-md border bg-muted/20 p-3"
-                    data-testid="ai-chat-log"
-                  >
-                    <For each={turns()} fallback={<p class="text-sm text-muted-foreground">No messages yet.</p>}>
-                      {(turn) => (
-                        <div class="space-y-1">
-                          <p class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                            {turn.role === "user" ? "You" : "AI"}
-                          </p>
-                          <p class="whitespace-pre-wrap text-sm">
-                            {turn.text || (pending() ? "…" : "")}
-                          </p>
-                        </div>
-                      )}
-                    </For>
-                  </div>
-                  <TextField>
-                    <TextFieldLabel>Message</TextFieldLabel>
-                    <TextFieldTextArea
-                      data-testid="ai-chat-input"
-                      rows={3}
-                      placeholder="Ask anything — replies in your language"
-                      value={input()}
-                      onInput={(e) => setInput(e.currentTarget.value)}
-                      disabled={pending() || status().kind === "busy"}
-                    />
-                  </TextField>
-                  <Button
-                    class="w-full sm:w-auto"
-                    data-testid="ai-chat-send"
-                    disabled={pending() || !input().trim() || status().kind === "busy"}
-                    onClick={() => void onChat()}
-                  >
-                    Send
-                  </Button>
+                  <ChatPanel
+                    turns={turns}
+                    pending={pending}
+                    status={status}
+                    input={input}
+                    setInput={setInput}
+                    onSend={() => void onChat()}
+                  />
                 </TabsContent>
 
                 <TabsContent value="summarize" class="space-y-3">
-                  <TextField>
-                    <TextFieldLabel>Text to summarize</TextFieldLabel>
-                    <TextFieldTextArea
-                      data-testid="ai-summarize-input"
-                      rows={5}
-                      placeholder="Paste text to summarize"
-                      value={input()}
-                      onInput={(e) => setInput(e.currentTarget.value)}
-                      disabled={pending() || status().kind === "busy"}
-                    />
-                  </TextField>
-                  <Button
-                    class="w-full sm:w-auto"
-                    data-testid="ai-summarize"
-                    disabled={pending() || !input().trim() || status().kind === "busy"}
-                    onClick={() => void onSummarize()}
-                  >
-                    Summarize
-                  </Button>
-                  <Show when={summary()}>
-                    <p
-                      class="whitespace-pre-wrap rounded-md border bg-muted/30 p-3 text-sm"
-                      data-testid="ai-summary-output"
-                    >
-                      {summary()}
-                    </p>
-                  </Show>
+                  <SummarizePanel
+                    pending={pending}
+                    status={status}
+                    input={input}
+                    setInput={setInput}
+                    onSummarize={() => void onSummarize()}
+                    summary={summary}
+                  />
                 </TabsContent>
 
                 <TabsContent value="qa" class="space-y-3">
-                  <p class="text-sm text-muted-foreground" data-testid="ai-qa-notes-count">
-                    Answers from your {activeNotes().length} local note
-                    {activeNotes().length === 1 ? "" : "s"} (embeddings stay on-device).
-                  </p>
-                  <TextField>
-                    <TextFieldLabel>Question</TextFieldLabel>
-                    <TextFieldTextArea
-                      data-testid="ai-qa-input"
-                      rows={3}
-                      placeholder="Ask about your notes"
-                      value={input()}
-                      onInput={(e) => setInput(e.currentTarget.value)}
-                      disabled={pending() || status().kind === "busy"}
-                    />
-                  </TextField>
-                  <Button
-                    class="w-full sm:w-auto"
-                    data-testid="ai-qa-ask"
-                    disabled={
-                      pending() ||
-                      !input().trim() ||
-                      status().kind === "busy" ||
-                      activeNotes().length === 0
-                    }
-                    onClick={() => void onAskNotes()}
-                  >
-                    Ask notes
-                  </Button>
-                  <Show when={ragAnswer()}>
-                    <p
-                      class="whitespace-pre-wrap rounded-md border bg-muted/30 p-3 text-sm"
-                      data-testid="ai-qa-output"
-                    >
-                      {ragAnswer()}
-                    </p>
-                  </Show>
+                  <QaPanel
+                    pending={pending}
+                    status={status}
+                    input={input}
+                    setInput={setInput}
+                    onAsk={() => void onAskNotes()}
+                    ragAnswer={ragAnswer}
+                    activeNotesCount={() => activeNotes().length}
+                  />
                 </TabsContent>
 
                 <TabsContent value="agent" class="space-y-3">
-                  <p class="text-sm text-muted-foreground">
-                    Local tool loop over your notes. Writes need confirmation.
-                  </p>
-                  <label class="block space-y-1 text-sm">
-                    <span class="font-medium">Skill</span>
-                    <select
-                      class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
-                      data-testid="ai-agent-skill"
-                      value={skillId()}
-                      onChange={(e) => setSkillId(e.currentTarget.value)}
-                      disabled={pending() || status().kind === "busy"}
-                    >
-                      <For each={skills}>
-                        {(skill) => <option value={skill.id}>{skill.name}</option>}
-                      </For>
-                    </select>
-                  </label>
-                  <Show when={selectedSkill()}>
-                    {(skill) => (
-                      <p class="text-xs text-muted-foreground">{skill().description}</p>
-                    )}
-                  </Show>
-                  <TextField>
-                    <TextFieldLabel>Task</TextFieldLabel>
-                    <TextFieldTextArea
-                      data-testid="ai-agent-input"
-                      rows={3}
-                      placeholder="e.g. Find notes about pasta and propose a summary note"
-                      value={input()}
-                      onInput={(e) => setInput(e.currentTarget.value)}
-                      disabled={pending() || status().kind === "busy"}
-                    />
-                  </TextField>
-                  <Button
-                    class="w-full sm:w-auto"
-                    data-testid="ai-agent-run"
-                    disabled={pending() || !input().trim() || status().kind === "busy"}
-                    onClick={() => void onAgentRun()}
-                  >
-                    Run agent
-                  </Button>
-                  <Show when={agentAnswer()}>
-                    <p
-                      class="whitespace-pre-wrap rounded-md border bg-muted/30 p-3 text-sm"
-                      data-testid="ai-agent-output"
-                    >
-                      {agentAnswer()}
-                    </p>
-                  </Show>
-                  <Show when={pendingWrite()}>
-                    {(pw) => (
-                      <Alert data-testid="ai-agent-confirm">
-                        <AlertTitle>Confirm write</AlertTitle>
-                        <AlertDescription class="space-y-3">
-                          <p>{pw().summary}</p>
-                          <div class="flex flex-wrap gap-2">
-                            <Button
-                              size="sm"
-                              data-testid="ai-agent-confirm-yes"
-                              disabled={pending()}
-                              onClick={() => void onConfirmWrite()}
-                            >
-                              Confirm
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              data-testid="ai-agent-confirm-no"
-                              disabled={pending()}
-                              onClick={onCancelWrite}
-                            >
-                              Cancel
-                            </Button>
-                          </div>
-                        </AlertDescription>
-                      </Alert>
-                    )}
-                  </Show>
+                  <AgentPanel
+                    pending={pending}
+                    status={status}
+                    input={input}
+                    setInput={setInput}
+                    skills={skills}
+                    skillId={skillId}
+                    setSkillId={setSkillId}
+                    selectedSkill={selectedSkill}
+                    onRun={() => void onAgentRun()}
+                    agentAnswer={agentAnswer}
+                    pendingWrite={pendingWrite}
+                    onConfirmWrite={() => void onConfirmWrite()}
+                    onCancelWrite={onCancelWrite}
+                  />
                 </TabsContent>
               </Tabs>
             </Show>
@@ -784,9 +452,8 @@ const AiPage: Component = () => {
           </CardContent>
           <Separator />
           <CardFooter class="text-xs text-muted-foreground">
-            Unload frees GPU RAM. Cached weights stay on disk for the next Load. Clear cache
-            removes downloaded weights; if that fails, clear this site&apos;s data in browser
-            settings.
+            Unload frees GPU RAM. Cached weights stay on disk for the next Load. Clear cache removes
+            downloaded weights; if that fails, clear this site&apos;s data in browser settings.
           </CardFooter>
         </Card>
       </Show>

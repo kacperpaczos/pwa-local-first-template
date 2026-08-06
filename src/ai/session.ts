@@ -37,6 +37,9 @@ let downloadInFlight: Promise<void> | null = null;
 let idleTimer: ReturnType<typeof setTimeout> | null = null;
 /** Resolves the deferred Web Lock hold started during download. */
 let releaseEngineLock: (() => void) | null = null;
+/** Settles once the lock manager has fully released the most recent hold —
+ * Web Locks unwind asynchronously after the holder callback resolves. */
+let engineLockDone: Promise<void> | null = null;
 let activeTier: AiTier | null = null;
 
 export type AiTelemetry = {
@@ -114,9 +117,17 @@ async function tryAcquireAiEngineLock(): Promise<boolean> {
     return true;
   }
 
+  // A just-released lock is freed only after its holder callback settles, so
+  // an immediate re-acquire with `ifAvailable` would spuriously fail. Only
+  // wait when we no longer hold it (releaseEngineLock already null).
+  if (engineLockDone && !releaseEngineLock) {
+    await engineLockDone.catch(() => undefined);
+    engineLockDone = null;
+  }
+
   return new Promise<boolean>((resolve) => {
     let settled = false;
-    void locks
+    engineLockDone = locks
       .request(AI_ENGINE_LOCK, { ifAvailable: true }, async (lock) => {
         if (!lock) {
           if (!settled) {
@@ -133,12 +144,15 @@ async function tryAcquireAiEngineLock(): Promise<boolean> {
           releaseEngineLock = release;
         });
       })
-      .catch(() => {
-        if (!settled) {
-          settled = true;
-          resolve(true);
-        }
-      });
+      .then(
+        () => undefined,
+        () => {
+          if (!settled) {
+            settled = true;
+            resolve(true);
+          }
+        },
+      );
   });
 }
 
@@ -294,6 +308,9 @@ export async function downloadAiModel(
 
 /** Frees GPU RAM; weights remain cached on disk for the next Load. */
 export async function unloadAiModel(): Promise<void> {
+  if (aiStatusStore.get().kind === "busy") {
+    throw new Error("Cannot unload the model while a generation is in progress.");
+  }
   clearIdleTimer();
   const current = provider;
   provider = null;

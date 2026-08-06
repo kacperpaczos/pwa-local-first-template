@@ -218,6 +218,35 @@ describe("AI session download + inference", () => {
     await downloadAiModel();
     expect(chatCalls).toBeGreaterThan(0);
   });
+
+  it("unloadAiModel refuses to unload while a generation is in progress", async () => {
+    let resolveChunk: (() => void) | undefined;
+    globalThis.__createAiProvider = () => ({
+      ...mockProvider(),
+      summarize: async function* () {
+        yield "partial";
+        await new Promise<void>((resolve) => {
+          resolveChunk = resolve;
+        });
+        yield " done";
+      },
+    });
+    await downloadAiModel();
+
+    const summarizePromise = summarizeWithAi("note");
+    await vi.waitFor(() => expect(aiStatusStore.get().kind).toBe("busy"));
+
+    await expect(unloadAiModel()).rejects.toThrow(/generation is in progress/);
+    // Refusing to unload must not have torn anything down.
+    expect(aiStatusStore.get().kind).toBe("busy");
+
+    resolveChunk?.();
+    await summarizePromise;
+    expect(aiStatusStore.get()).toEqual({ kind: "ready" });
+
+    // Once idle again, unload works normally.
+    await expect(unloadAiModel()).resolves.toBeUndefined();
+  });
 });
 
 describe("idle unload", () => {
