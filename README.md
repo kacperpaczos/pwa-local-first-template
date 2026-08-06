@@ -9,8 +9,8 @@ A local-first progressive web app template for offline-capable, multi-device doc
 Most "sync later" tutorials either hide persistence behind a cloud API or treat a peer library as the database. This template does neither:
 
 1. The browser keeps the **source of truth** (SQLite in OPFS).
-2. An **outbox** records local writes while offline.
-3. A swappable **sync transport** moves signed, encrypted mutations between devices — no backend server owns the data.
+2. Local writes append to a **per-device, hash-linked operation log** before the outbox publishes them.
+3. A swappable **sync transport** moves signed, encrypted operations between devices — no backend server owns the data.
 4. A fixed **merge policy** reconciles concurrent edits.
 
 Gun is used only as mesh transport for signed, encrypted payloads. It is not the application database, and it is not meant to be permanent — see [Architecture by layer](#architecture-by-layer-compared-to-p2panda) below for why.
@@ -36,13 +36,14 @@ So the gap this template fills is specifically: **browser-only, no backend serve
 | --- | --- |
 | UI | Solid.js + SolidUI/Tailwind notes, settings, AI |
 | Local DB | TanStack DB + SQLite/OPFS behind `PersistenceFacade` |
-| Offline | `@tanstack/offline-transactions` outbox |
-| Sync | `GunSyncTransport` (or `NoopSyncTransport` when no peers) |
-| Wire protocol | Entity-agnostic envelope + per-entity schema registry (`protocol.ts`, `entity-registry.ts`) |
-| Identity | SEA keypair + AES-GCM space key; QR/JSON + SAS pairing; BIP39 recovery |
+| Offline | `@tanstack/offline-transactions` outbox, backed by a durable per-device op log |
+| Op log | Signed, hash-linked per-device append-only log (`shared/oplog/`, `shared/store/oplog-store.ts`) |
+| Sync | `GunLogTransport` + `SyncEngine` (or `NoopLogTransport` when no peers) |
+| Wire protocol | Entity-agnostic envelope wrapping a signed op header + ciphertext, per-entity payload schema registry (`protocol.ts`, `oplog/payload.ts`) |
+| Identity | SEA keypair (Gun ACL) + per-device ed25519 signing key + AES-GCM space key; QR/JSON + SAS pairing; BIP39 recovery |
 | Conflicts | LWW (title, soft-delete) + Loro CRDT (body) + local conflict history |
 | PWA | Vite + Workbox service worker |
-| AI | Optional on-device WebLLM (summarize, meta, RAG, agent) |
+| AI | Optional on-device WebLLM, opt-in (summarize, meta, RAG, agent) |
 | Backup | JSON merge-import + SQL dump; integrity check + recovery |
 | Docs | [`docs/architecture.md`](docs/architecture.md) + [`docs/adr/`](docs/adr/) |
 
@@ -75,30 +76,33 @@ UI (Solid)
   → PersistenceFacade
   → TanStack collection + OPFS SQLite   ← source of truth
   → outbox
-  → SyncTransport.push / pull
-  → Gun mesh (SEA + space-key encrypted mutations)
+  → OpLogStore.append (durable, per-device hash-linked log)
+  → SyncEngine.flush → LogSyncTransport.publish
+  → Gun mesh (SEA-authenticated graph, space-key encrypted op rows)
   → other device
-  → applyRemoteMutations → mergeNote (LWW / Loro)
+  → SyncEngine: fetch → OpLogStore.ingest → materializeNoteOps → mergeNote (LWW / Loro)
   → local OPFS again
 ```
 
 p2panda is a different kind of thing than this template — it's a modular **engine** (you bring the UI, product schema, and usually a native host), not an app slice. They're not drop-in replacements: adopting p2panda would replace the networking and operation model, not the product application. The table below breaks both down layer by layer, since "is this template like p2panda" only makes sense per-layer, not as a single yes/no.
 
+**v0.1 note:** since [ADR-010](docs/adr/010-per-device-op-log.md), this template's own data model *is* a per-device append-only operation log — the biggest structural gap to p2panda from earlier versions is closed. What's left is mostly the transport (no p2panda browser binding yet) and real per-device authorization (p2panda-auth vs. this template's all-or-nothing shared space key).
+
 | # | Layer | This template | p2panda equivalent | Relationship |
 | --- | --- | --- | --- | --- |
 | 1 | UI | Solid notes / settings / AI (`src/features/`) | Bring your own | No overlap — out of scope for p2panda by design |
-| 2 | Local persistence | OPFS SQLite, entity **snapshots**, behind `PersistenceFacade` (`src/shared/db/`) | Append-only signed **operation log**, materialized into views | Different data model, not just different tech: this template has a per-device SoT it owns; p2panda's log is closer to the SoT itself |
-| 3 | Outbox / offline writes | `@tanstack/offline-transactions` queues local mutations while offline | Not a distinct concept — operations are written straight to your own log | No direct analog; a consequence of #2's snapshot model |
-| 4 | Wire protocol | Versioned envelope (`v`/`idempotencyKey`/`entity`/`op`/`payload`), entity-agnostic via a schema registry (`protocol.ts`, `entity-registry.ts`) | Signed `Operation` (key + signature + body), hash-linked into a log | Conceptually parallel (both are a typed, versioned unit of change) but structurally different — snapshot-with-op vs. hash-chained log entry |
+| 2 | Local persistence | OPFS SQLite materialized from a **per-device append-only operation log**, behind `PersistenceFacade` + `OpLogStore` (`src/shared/db/`, `src/shared/store/`) | Append-only signed **operation log**, materialized into views | Same shape now: full-state payloads vs. p2panda's deltas is the remaining difference, and a deliberate v0.1 simplification (see ADR-010) |
+| 3 | Outbox / offline writes | `@tanstack/offline-transactions` queues local writes; the log's `published` flag is itself the durable outbox | Not a distinct concept — operations are written straight to your own log | Converged: local writes append to the log first (durable), then publish — this template no longer treats "local commit" and "on the log" as different moments |
+| 4 | Wire protocol | Versioned envelope wrapping a signed, hash-linked op header + ciphertext, entity-agnostic via a payload schema registry (`protocol.ts`, `oplog/header.ts`, `oplog/payload.ts`) | Signed `Operation` (key + signature + body), hash-linked into a log | Structurally aligned: both are a signed, hash-linked unit in an append-only per-author log. Encoding differs (sorted-key JSON vs. CBOR/Postcard) — a mechanical swap, not a redesign |
 | 5 | Content encryption | AES-256-GCM "space key" shared by paired devices, BIP39-wrapped for recovery (`shared/crypto/envelope.ts`, `shared/identity/space.ts`, `recovery.ts`) | `p2panda-encryption` — decentralised group encryption with post-compromise security and optional forward secrecy, CRDT-based membership | p2panda's scheme is strictly more advanced (real revocation, forward secrecy); this template's single shared key has neither yet — see [caveats](#known-caveats) |
-| 6 | Identity | Split: Gun SEA pair authenticates the transport; the space key is the actual content secret (`shared/identity/`) | Ed25519 keypair signs every operation directly — identity and content authenticity are the same mechanism | This template bifurcates transport auth from content secrecy; p2panda unifies them at the operation level |
-| 7 | Conflict resolution | Fixed policy: LWW (Lamport clocks) for scalar fields, Loro CRDT for body text (`merge-note.ts`, `crdt.ts`) | Bring your own CRDT — the log format is CRDT-compatible but doesn't mandate one | Same "pluggable, not prescriptive" philosophy, applied at different granularity (whole-entity here vs. raw op-log there) |
-| 8 | Sync transport | `SyncTransport` interface — `GunSyncTransport` today, `NoopSyncTransport` when offline-only (`shared/sync/transport.ts`, `gun-transport.ts`) | `p2panda-net` (iroh-based discovery/gossip/direct connections) | `p2panda-sync` is explicitly described upstream as "transport-agnostic... compatible with p2panda-net **or other peer-to-peer networking solutions**" — same swap-point philosophy as this template's `SyncTransport`, just not usable from a browser yet (see [Purpose](#purpose)) |
+| 6 | Identity | Per-device ed25519 keypair signs every op directly (op attribution); a separate shared Gun SEA pair authenticates the transport graph; the space key is the content secret (`shared/identity/`) | Ed25519 keypair signs every operation directly — identity and content authenticity are the same mechanism | Op attribution now matches p2panda's model (ed25519 signs the op); transport auth is still a separate, shared secret — a real Gun replacement (layer 8) would let this collapse further |
+| 7 | Conflict resolution | Fixed policy: LWW (Lamport clocks) for scalar fields, Loro CRDT for body text, applied while materializing the log (`materialize.ts`, `merge-note.ts`, `crdt.ts`) | Bring your own CRDT — the log format is CRDT-compatible but doesn't mandate one | Same "pluggable, not prescriptive" philosophy, applied at different granularity (whole-entity here vs. raw op-log there) |
+| 8 | Sync transport | `LogSyncTransport` interface — `GunLogTransport` today, `NoopLogTransport` when offline-only (`shared/sync/transport.ts`, `gun-log-transport.ts`) | `p2panda-net` (iroh-based discovery/gossip/direct connections) | `p2panda-sync` is explicitly described upstream as "transport-agnostic... compatible with p2panda-net **or other peer-to-peer networking solutions**" — same swap-point philosophy as this template's `LogSyncTransport`, just not usable from a browser yet (see [Purpose](#purpose)) |
 | 9 | Host | Browser PWA, Chromium + OPFS only (Vite + Workbox) | Primarily native Rust; browser bindings experimental/nonexistent for the current architecture | This is the actual reason the two projects don't currently compete — p2panda isn't aiming at the browser yet |
 
-**The practical integration hinge is layer 8.** `SyncTransport` is the one seam explicitly designed to be swapped without touching layers 1–3 or 6–7. Layer 5 (encryption) is the other realistic near-term swap point — `p2panda-encryption`'s scheme is a strict upgrade over the current single-shared-key model, if/when it ships a browser binding, and only requires reimplementing `seal()`/`open()` in `shared/crypto/envelope.ts`.
+**The practical integration hinge is layer 8.** `LogSyncTransport` is the one seam explicitly designed to be swapped without touching layers 1–3 or 6–7 — `p2panda-net`'s own browser story is iroh's "Browsers Alpha" (relay-only) as of this writing, so the seam exists but isn't switched on. Layer 5 (encryption) is the other realistic near-term swap point — `p2panda-encryption`'s scheme is a strict upgrade over the current single-shared-key model, if/when it ships a browser binding, and requires reimplementing `seal()`/`open()` in `shared/crypto/envelope.ts` plus wiring real group membership (which has no home in `shared/identity/space.ts` today — see [ADR-010](docs/adr/010-per-device-op-log.md)).
 
-Full non-comparative diagram and swap-point reference: [`docs/architecture.md`](docs/architecture.md). Decision history: [`docs/adr/`](docs/adr/).
+Full non-comparative diagram, swap-point reference, and the module-by-module v0.2 mapping: [`docs/architecture.md`](docs/architecture.md) and [ADR-010](docs/adr/010-per-device-op-log.md). Decision history: [`docs/adr/`](docs/adr/).
 
 ---
 
@@ -109,11 +113,13 @@ src/
   app/                 App shell and routing
   features/notes/      Notes UI and local store wiring
   features/ai/         AI panel (shown only when AI is available)
-  features/settings/   Backup, SEA/QR pairing, persist status, recovery
+  features/settings/   Backup, SEA/QR pairing, device roster, persist status, recovery
   features/home/       Landing copy
-  shared/db/           Schemas, facade, IDs, Lamport clocks, Loro helpers, DbProvider
-  shared/sync/         SyncTransport, Gun adapter, protocol + entity registry, merge, mutex
-  shared/identity/     SEA pair, space key, QR/JSON + SAS pairing, BIP39 recovery
+  shared/db/           Schemas, facade, IDs, Lamport clocks, Loro helpers, DbProvider, client (op-log wiring)
+  shared/oplog/        Signed op header (ed25519 + blake3), per-entity payload schemas, chain rules
+  shared/store/        OpLogStore (per-device log), persistence port, materializer (log → notes)
+  shared/sync/         LogSyncTransport, Gun adapter, SyncEngine, protocol, merge, GC coverage
+  shared/identity/      SEA pair, per-device signing key, space key, QR/JSON + SAS pairing, BIP39 recovery
   ai/                  WebLLM session, GPU/storage gates, provider adapter, agent, embeddings
   backup/              JSON export/import, storage.persist(), integrity check
 server/gun-peer/       Lightweight Gun peer for local mesh / e2e reset
@@ -126,10 +132,11 @@ e2e/                   Playwright helpers and specs
 | --- | --- |
 | Note fields / validation | `src/shared/db/schemas.ts` |
 | Create / update / delete API for UI | `src/shared/db/facade.ts` |
-| Conflict rules | `src/shared/sync/merge-note.ts`, `src/shared/db/crdt.ts` |
-| Wire protocol shape / add a second entity | `src/shared/sync/protocol.ts`, `src/shared/sync/entity-registry.ts` |
-| Replace Gun with another transport | implement `SyncTransport` in `src/shared/sync/` |
-| Identity / pairing | `src/shared/identity/` |
+| Conflict rules | `src/shared/sync/merge-note.ts`, `src/shared/db/crdt.ts`, `src/shared/store/materialize.ts` |
+| Op header / signing scheme | `src/shared/oplog/header.ts` |
+| Wire protocol shape / add a second entity | `src/shared/sync/protocol.ts`, `src/shared/oplog/payload.ts` |
+| Replace Gun with another transport | implement `LogSyncTransport` in `src/shared/sync/` |
+| Identity / pairing / device keys | `src/shared/identity/` |
 | AI behaviour | `src/ai/` |
 | Backup format | `src/backup/` |
 
@@ -140,12 +147,12 @@ e2e/                   Playwright helpers and specs
 ```bash
 # .env / CI examples
 VITE_GUN_PEERS=http://127.0.0.1:8765/gun
-VITE_AI_ENABLED=true
-VITE_AI_MODEL_ID=...   # optional; defaults to a small SmolLM2 WebLLM build
+VITE_AI_ENABLED=true   # opt-in: any other value (or unset) ships AI off
+VITE_AI_MODEL_ID=...   # optional; defaults to a hardware-detected Qwen3/Llama tier
 VITE_E2E=1             # e2e-only hooks (do not use in production)
 ```
 
-In `import.meta.env.DEV`, if `VITE_GUN_PEERS` is empty, the app defaults to `http://127.0.0.1:8765/gun`.
+In `import.meta.env.DEV`, if `VITE_GUN_PEERS` is empty, the app defaults to `http://127.0.0.1:8765/gun`. `VITE_AI_ENABLED` is opt-in — a production build ships with AI off unless it is explicitly set to `"true"` at build time.
 
 ---
 
@@ -159,20 +166,24 @@ In `import.meta.env.DEV`, if `VITE_GUN_PEERS` is empty, the app defaults to `htt
 | `pnpm build` | Production build + service worker |
 | `pnpm preview` | Preview production build |
 | `pnpm typecheck` | `tsc --noEmit` |
-| `pnpm test` / `pnpm test:unit` | Vitest |
+| `pnpm lint` / `pnpm lint:fix` | Biome (lint + format) |
+| `pnpm test` / `pnpm test:unit` | Vitest (`unit` + `dom` projects) |
 | `pnpm test:e2e` | Playwright (Chromium smoke + sync) |
 | `pnpm test:e2e:sync` | Sync project only (serial + peer reset) |
 | `pnpm test:all` | Unit + e2e |
 
-**Definition of done:** `pnpm typecheck && pnpm test:all` must be green. CI runs the same on `push` / `pull_request` to `main` (`.github/workflows/ci.yml`).
+**Definition of done:** `pnpm lint && pnpm typecheck && pnpm test:all` must be green. CI runs the same on `push` / `pull_request` to `main`, plus a weekly scheduled run against dependency drift (`.github/workflows/ci.yml`).
 
 ### Test pyramid
 
 ```text
-Unit (Vitest)     protocol + entity registry, CRDT, merge, mutex,
-                  Gun transport (fake graph, real SEA crypto),
-                  apply-remote / facade / gc (mocked @tanstack/db),
-                  AI gates/session, identity/crypto (all real)
+Unit (Vitest, 2 projects)
+  unit (node)   op header/chain/store, materializer, protocol, merge,
+                Gun transport (fake graph, real SEA + AES-GCM crypto),
+                facade / gc (mocked @tanstack/db), AI gates/session,
+                identity/crypto (all real)
+  dom (jsdom)   component tests (Solid Testing Library) — install
+                prompt, error boundary, pairing error path
 E2E (Playwright)  CRUD, offline→online, multi-tab OPFS, Gun peers
                   (real network + real OPFS), concurrent body merge,
                   backup, AI panel (mocked model, real orchestration)
@@ -190,30 +201,31 @@ Notes for e2e:
 ## What already works
 
 - Local-first note CRUD with OPFS SQLite as source of truth
-- Offline writes through the outbox
-- Hybrid merge (LWW + Loro) with unit and e2e coverage
-- Swappable sync transport (Gun / noop) with protocol `v` gating
-- Wire protocol generalized beyond a single entity via a schema registry — a second entity/app can share the same envelope and encrypted-space transport without touching `protocol.ts` again
-- SEA identity + space-key AES-GCM, QR/JSON + SAS pairing, BIP39 recovery
-- SEA/space ciphertext on the Gun path (peer is untrusted for note bodies)
+- Offline writes through the outbox, backed by a durable per-device operation log (the log's `published` flag *is* the outbox)
+- Hybrid merge (LWW + Loro) applied while materializing the log, with unit and e2e coverage
+- Swappable sync transport (`LogSyncTransport`: Gun / noop) with protocol `v` gating that does not latch on a single incompatible row
+- Signed, hash-linked op log generalized beyond a single entity via a per-entity payload schema registry — a second entity/app can share the same log/materialize/transport machinery without touching `protocol.ts` again
+- SEA transport auth + per-device ed25519 op signing + space-key AES-GCM, QR/JSON + SAS pairing (payload v3), BIP39 recovery
+- Space ciphertext on the Gun path, fail-closed with no weaker fallback cipher (peer is untrusted for note bodies)
+- Real GC coverage gate: tombstones hard-delete only once every known peer has acked the deleting op, not just past a local Lamport threshold
 - Multi-tab OPFS coordination
-- PWA installability / service worker caching for WASM assets
-- Feature-flagged on-device AI (summarize, meta, RAG, agent, tiers)
-- JSON backup round-trip through merge + SQL dump
-- Tombstone GC, encrypted checkpoints, local conflict history
+- PWA installability / service worker caching for WASM assets, with an update-available toast (no silent auto-reload)
+- Feature-flagged (opt-in) on-device AI (summarize, meta, RAG, agent, tiers)
+- JSON backup round-trip through the same log-append + merge path as any remote op, plus SQL dump
+- Tombstone GC, local conflict history, device roster (Settings)
 - Startup integrity check and recovery UI
-- Automated unit + Chromium e2e suite, with mock boundaries documented in-file
+- Automated unit + component (Solid Testing Library) + Chromium e2e suite, with mock boundaries documented in-file; Biome lint/format in CI
 - Dockerised gun-peer for production-style mesh hosting
 
 ---
 
 ## What still needs deliberate design
 
-- Multi-user tenancy / capabilities beyond a shared SEA + space key
-- Device revocation and key rotation (Phase 5)
+- Multi-user tenancy / capabilities beyond a shared SEA + space key — every device holding the space key has full read/write, with no notion of roles
+- Device revocation and key rotation — the device roster (Settings) shows who has synced, but there's no way to revoke one
 - Real forward secrecy / post-compromise security for content encryption — `p2panda-encryption` solves this today, this template's single shared key does not (see layer 5 above)
-- Whether sync should move from snapshot mutations toward an append-only op-log — no forcing function today: OPFS is already a per-device source of truth, so the main benefit of an op-log (efficient partial sync without a SoT) doesn't clearly apply here
-- p2panda/iroh as a future transport: no official browser/WASM binding exists yet for the current (post-rewrite) p2panda architecture — revisit when either ships a stable one, not on a fixed timeline (see [Purpose](#purpose), ADR-005)
+- Op log compaction / pruning — full-state payloads mean log size grows with edit count; no compaction ships in v0.1 (see [ADR-010](docs/adr/010-per-device-op-log.md))
+- p2panda/iroh as a future transport: no official browser/WASM binding exists yet for the current (post-rewrite) p2panda architecture — revisit when either ships a stable one, not on a fixed timeline (see [Purpose](#purpose), ADR-005, ADR-010's v0.2 mapping table)
 - Safari / non-Chromium hosts, or a native shell if OPFS remains limiting
 - Maturity of `@tanstack/browser-db-sqlite-persistence` (facade allows swap)
 - Longer-term schema evolution beyond current `schemaVersion` / backup schema
@@ -222,10 +234,11 @@ Notes for e2e:
 
 ## Known caveats
 
-- `@tanstack/browser-db-sqlite-persistence` is young; keep changes behind `PersistenceFacade`.
+- `@tanstack/browser-db-sqlite-persistence` is young; keep changes behind `PersistenceFacade`. It also confirms writes through an async round trip — code that reads a collection immediately after a `tx.commit()` resolves can observe a just-written row as momentarily absent (see `OpLogStore`'s in-memory read index in [ADR-010](docs/adr/010-per-device-op-log.md) for the pattern this template uses to avoid depending on that timing).
 - Gun is transport only; do not treat the peer graph as application SoT.
 - The OPFS database file is not precached by the service worker. Loro WASM (~3 MB) and related workers use runtime `CacheFirst`.
-- `notes` and `sync_meta` must use the **same** `schemaVersion`.
-- QR/JSON identity export contains private key material — handle it like a password.
+- All persisted collections (`notes`, `oplog_ops`, `oplog_heads`) must use the **same** `schemaVersion`.
+- QR/JSON pairing payload contains private key material (SEA pair, space key) — handle it like a password. Device signing keys are the one thing pairing never transfers.
 - The shared space key has no revocation or forward secrecy: anyone who ever had it can decrypt history. Don't treat pairing as reversible.
+- **Breaking change from pre-v0.1 builds:** protocol v3 (ADR-010) does not read old `app_sync` graph data. A device upgrading from a pre-v0.1 build republishes its local notes as a fresh op-log genesis on first boot; this converges across devices via the normal merge path but is not a byte-for-byte migration of prior sync history.
 - Real WebLLM downloads are not run in CI; e2e uses injected mocks.
