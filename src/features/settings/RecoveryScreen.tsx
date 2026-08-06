@@ -4,13 +4,7 @@ import { downloadBackupFile, exportNotesAsBackup } from "@/backup/export";
 import { importBackup, parseBackupFile } from "@/backup/import";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 type Props = {
   db: AppDatabase;
@@ -53,9 +47,7 @@ const RecoveryScreen: Component<Props> = (props) => {
         props.db.syncMutex,
         backup,
       );
-      setStatus(
-        `Imported ${summary.applied}/${summary.totalInBackup} notes. Refresh the page.`,
-      );
+      setStatus(`Imported ${summary.applied}/${summary.totalInBackup} notes. Refresh the page.`);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
     } finally {

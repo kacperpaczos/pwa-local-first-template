@@ -2,10 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { mergeNote } from "./merge-note";
 import { createBodyDoc, updateBodyDoc } from "../db/crdt";
 import type { Note } from "../db/schemas";
-import {
-  CONFLICT_LOG_STORAGE_KEY,
-  listConflicts,
-} from "./conflict-log";
+import { CONFLICT_LOG_STORAGE_KEY, listConflicts } from "./conflict-log";
 
 function stubLocalStorage() {
   const map = new Map<string, string>();

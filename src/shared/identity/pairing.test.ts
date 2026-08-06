@@ -87,9 +87,7 @@ describe("pairing", () => {
     const previewed = await previewPairingPayload(payload);
     const deviceB = memoryStorage();
 
-    await expect(
-      commitPairingPayload(previewed, "000000", deviceB),
-    ).rejects.toThrow(/SAS/);
+    await expect(commitPairingPayload(previewed, "000000", deviceB)).rejects.toThrow(/SAS/);
     expect(loadStoredPair(deviceB)).toBeNull();
   });
 
@@ -121,9 +119,9 @@ describe("pairing", () => {
       // Astronomically unlikely (~1e-6) — treat as a non-flaky skip.
       return;
     }
-    await expect(
-      commitPairingPayload(previewed, genuineSas, memoryStorage()),
-    ).rejects.toThrow(/SAS/);
+    await expect(commitPairingPayload(previewed, genuineSas, memoryStorage())).rejects.toThrow(
+      /SAS/,
+    );
   });
 
   it("round-trips via JSON", async () => {

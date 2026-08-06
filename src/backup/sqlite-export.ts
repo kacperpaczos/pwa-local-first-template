@@ -32,9 +32,7 @@ export async function exportDatabaseAsSql(db: AppDatabase): Promise<string> {
       lines.push(`${createSql};`);
     }
 
-    const rows = await db.rawDb.execute<Record<string, unknown>>(
-      `SELECT * FROM "${name}"`,
-    );
+    const rows = await db.rawDb.execute<Record<string, unknown>>(`SELECT * FROM "${name}"`);
     for (const row of rows) {
       const cols = Object.keys(row);
       if (cols.length === 0) continue;

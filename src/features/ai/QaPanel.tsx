@@ -45,7 +45,10 @@ const QaPanel: Component<QaPanelProps> = (props) => {
         Ask notes
       </Button>
       <Show when={props.ragAnswer()}>
-        <p class="whitespace-pre-wrap rounded-md border bg-muted/30 p-3 text-sm" data-testid="ai-qa-output">
+        <p
+          class="whitespace-pre-wrap rounded-md border bg-muted/30 p-3 text-sm"
+          data-testid="ai-qa-output"
+        >
           {props.ragAnswer()}
         </p>
       </Show>

@@ -1,11 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  exportSpaceKey,
-  generateSpaceKey,
-  importSpaceKey,
-  open,
-  seal,
-} from "./envelope";
+import { exportSpaceKey, generateSpaceKey, importSpaceKey, open, seal } from "./envelope";
 
 describe("envelope", () => {
   it("generates and round-trips a space key via base64 raw export", async () => {

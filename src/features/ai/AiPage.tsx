@@ -33,7 +33,14 @@ import { createAsyncAction } from "@/shared/lib/async-action";
 import PageHeader from "@/components/PageHeader";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import ModelPanel from "./ModelPanel";
@@ -123,7 +130,9 @@ const AiPage: Component = () => {
 
   const skills = listSkills().filter((s) => s.enabled);
   const [skillId, setSkillId] = createSignal(skills[0]?.id ?? "strict-qa");
-  const selectedSkill = createMemo((): Skill | undefined => skills.find((s) => s.id === skillId()) ?? skills[0]);
+  const selectedSkill = createMemo(
+    (): Skill | undefined => skills.find((s) => s.id === skillId()) ?? skills[0],
+  );
 
   const [input, setInput] = createSignal("");
   const [summary, setSummary] = createSignal("");
@@ -218,7 +227,11 @@ const AiPage: Component = () => {
       const question = input().trim();
       if (!question) return;
       setInput("");
-      setTurns((prev) => [...prev, { role: "user", text: question }, { role: "assistant", text: "" }]);
+      setTurns((prev) => [
+        ...prev,
+        { role: "user", text: question },
+        { role: "assistant", text: "" },
+      ]);
       const text = await chatWithAi(question, (chunk) => {
         setTurns((prev) => {
           const next = prev.slice();
@@ -330,7 +343,9 @@ const AiPage: Component = () => {
         fallback={
           <Alert data-testid="ai-unavailable">
             <AlertTitle>AI unavailable</AlertTitle>
-            <AlertDescription>On-device AI needs WebGPU. Notes still work without it.</AlertDescription>
+            <AlertDescription>
+              On-device AI needs WebGPU. Notes still work without it.
+            </AlertDescription>
           </Alert>
         }
       >

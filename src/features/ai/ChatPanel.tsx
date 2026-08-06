@@ -21,7 +21,10 @@ const ChatPanel: Component<ChatPanelProps> = (props) => {
         class="max-h-72 space-y-3 overflow-auto rounded-md border bg-muted/20 p-3"
         data-testid="ai-chat-log"
       >
-        <For each={props.turns()} fallback={<p class="text-sm text-muted-foreground">No messages yet.</p>}>
+        <For
+          each={props.turns()}
+          fallback={<p class="text-sm text-muted-foreground">No messages yet.</p>}
+        >
           {(turn) => (
             <div class="space-y-1">
               <p class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">

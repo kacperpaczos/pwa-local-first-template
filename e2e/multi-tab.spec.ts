@@ -25,9 +25,7 @@ test("two tabs on the same origin share one OPFS database via the coordinator", 
   await context.close();
 });
 
-test("soft-delete on tab A removes the note from the active list on tab B", async ({
-  browser,
-}) => {
+test("soft-delete on tab A removes the note from the active list on tab B", async ({ browser }) => {
   const { context, tabA, tabB } = await openTwoTabs(browser);
 
   const title = uniqueTitle("Multi-tab delete");

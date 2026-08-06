@@ -1,7 +1,4 @@
-import {
-  aiFeatureEnabled,
-  resolveAiModelApproxBytes,
-} from "./config";
+import { aiFeatureEnabled, resolveAiModelApproxBytes } from "./config";
 import { hasWebGpu } from "./gpu";
 import { setAiAvailable, setAiUnavailable, aiStatusStore, type AiStatus } from "./status";
 import { refreshAiCacheStatus } from "./session";

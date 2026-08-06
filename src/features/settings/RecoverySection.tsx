@@ -21,7 +21,12 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { TextField, TextFieldInput, TextFieldLabel, TextFieldTextArea } from "@/components/ui/text-field";
+import {
+  TextField,
+  TextFieldInput,
+  TextFieldLabel,
+  TextFieldTextArea,
+} from "@/components/ui/text-field";
 
 type ConfirmSlot = { index: number; value: string };
 
@@ -158,7 +163,11 @@ const RecoverySection: Component = () => {
                       value={recoveryBundleJson()}
                     />
                   </TextField>
-                  <Button variant="outline" data-testid="recovery-download" onClick={downloadRecoveryBundle}>
+                  <Button
+                    variant="outline"
+                    data-testid="recovery-download"
+                    onClick={downloadRecoveryBundle}
+                  >
                     <Download class="size-4" />
                     Download recovery bundle
                   </Button>

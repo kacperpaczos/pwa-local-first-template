@@ -117,7 +117,9 @@ export function createPersistenceFacade(db: AppDatabase): PersistenceFacade {
         () => {
           const current = db.notes.get(id);
           return Boolean(
-            current && current.title_lamport === updated.title_lamport && current.body === updated.body,
+            current &&
+              current.title_lamport === updated.title_lamport &&
+              current.body === updated.body,
           );
         },
         updated,

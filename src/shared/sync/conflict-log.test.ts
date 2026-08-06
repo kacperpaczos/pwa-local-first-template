@@ -46,13 +46,16 @@ describe("conflict-log", () => {
 
   it("returns null without storage (no localStorage)", () => {
     expect(
-      recordConflict({
-        noteId: "n1",
-        field: "title",
-        lostValue: "a",
-        lostLamport: 1,
-        wonValue: "b",
-      }, undefined),
+      recordConflict(
+        {
+          noteId: "n1",
+          field: "title",
+          lostValue: "a",
+          lostLamport: 1,
+          wonValue: "b",
+        },
+        undefined,
+      ),
     ).toBeNull();
   });
 

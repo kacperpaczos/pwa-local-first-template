@@ -1,5 +1,11 @@
 import { expect, test } from "@playwright/test";
-import { createNote, resetGunPeer, uniqueTitle, waitForNoteSynced, waitForNotesReady } from "./helpers";
+import {
+  createNote,
+  resetGunPeer,
+  uniqueTitle,
+  waitForNoteSynced,
+  waitForNotesReady,
+} from "./helpers";
 
 test.beforeEach(async () => {
   await resetGunPeer();
@@ -36,7 +42,9 @@ test("export on one device, import on a fresh device, data (incl. tombstones) ma
   const chunks: Buffer[] = [];
   for await (const chunk of stream!) chunks.push(chunk as Buffer);
   const backupJson = Buffer.concat(chunks).toString("utf-8");
-  const exported = JSON.parse(backupJson) as { notes: Array<{ title: string; deleted_at: string | null }> };
+  const exported = JSON.parse(backupJson) as {
+    notes: Array<{ title: string; deleted_at: string | null }>;
+  };
   expect(exported.notes.length).toBeGreaterThanOrEqual(2);
   expect(exported.notes.find((n) => n.title === deletedTitle)?.deleted_at).not.toBeNull();
 
@@ -55,16 +63,16 @@ test("export on one device, import on a fresh device, data (incl. tombstones) ma
 
   await pageB.getByRole("link", { name: "Notes" }).click();
   await expect(pageB.getByTestId("note-item").filter({ hasText: activeTitle })).toHaveCount(1);
-  await expect(
-    pageB.getByTestId("note-item").filter({ hasText: activeTitle }),
-  ).toContainText("Body to restore");
+  await expect(pageB.getByTestId("note-item").filter({ hasText: activeTitle })).toContainText(
+    "Body to restore",
+  );
   await expect(pageB.getByTestId("note-item").filter({ hasText: deletedTitle })).toHaveCount(0);
 
   await pageB.getByTestId("filter-all").click();
   await expect(pageB.getByTestId("note-item").filter({ hasText: deletedTitle })).toHaveCount(1);
-  await expect(
-    pageB.getByTestId("note-item").filter({ hasText: deletedTitle }),
-  ).toContainText("(deleted)");
+  await expect(pageB.getByTestId("note-item").filter({ hasText: deletedTitle })).toContainText(
+    "(deleted)",
+  );
 
   await contextA.close();
   await contextB.close();
@@ -88,7 +96,11 @@ test("importing the same backup twice does not duplicate notes", async ({ browse
   for await (const chunk of stream!) chunks.push(chunk as Buffer);
   const backupJson = Buffer.concat(chunks).toString("utf-8");
 
-  const file = { name: "backup.json", mimeType: "application/json", buffer: Buffer.from(backupJson, "utf-8") };
+  const file = {
+    name: "backup.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(backupJson, "utf-8"),
+  };
   await page.getByTestId("backup-import").setInputFiles(file);
   await expect(page.getByTestId("backup-status")).toContainText("Imported");
   await page.getByTestId("backup-import").setInputFiles(file);

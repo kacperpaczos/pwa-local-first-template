@@ -135,8 +135,7 @@ export function recommendTier(profile: HardwareProfile): AiTier {
     return "dev";
   }
 
-  const ramOkForMax =
-    deviceMemory == null || deviceMemory >= MAX_TIER_MIN_DEVICE_MEMORY_GIB;
+  const ramOkForMax = deviceMemory == null || deviceMemory >= MAX_TIER_MIN_DEVICE_MEMORY_GIB;
   const bufferOkForMax = maxBufferSize != null && maxBufferSize >= MAX_TIER_MIN_BUFFER;
   const storageOkForMax = storageOkFor("max", storageFreeBytes);
 

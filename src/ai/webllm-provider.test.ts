@@ -55,8 +55,7 @@ describe("WebLlmAiProvider", () => {
   });
 
   it("honours AbortSignal during summarize", async () => {
-    const createEngine: CreateEngineFn = async () =>
-      createFakeEngine(["a", "b", "c", "d"]);
+    const createEngine: CreateEngineFn = async () => createFakeEngine(["a", "b", "c", "d"]);
     const provider = new WebLlmAiProvider({ modelId: "fake", createEngine });
     await provider.init(() => undefined);
 

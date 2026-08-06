@@ -51,13 +51,10 @@ export async function phraseToWrappingKey(mnemonic: string): Promise<CryptoKey> 
   }
   const seed = mnemonicToSeedSync(normalized);
   const raw = asBufferSource(hkdf(sha256, seed, HKDF_SALT, HKDF_INFO, 32));
-  return crypto.subtle.importKey(
-    "raw",
-    raw,
-    { name: "AES-GCM", length: 256 },
-    false,
-    ["encrypt", "decrypt"],
-  );
+  return crypto.subtle.importKey("raw", raw, { name: "AES-GCM", length: 256 }, false, [
+    "encrypt",
+    "decrypt",
+  ]);
 }
 
 export async function wrapSpaceKey(
@@ -78,13 +75,10 @@ export async function unwrapSpaceKey(
   if (raw.byteLength !== 32) {
     throw new Error("Unwrapped key has invalid length");
   }
-  return crypto.subtle.importKey(
-    "raw",
-    raw,
-    { name: "AES-GCM", length: 256 },
-    true,
-    ["encrypt", "decrypt"],
-  );
+  return crypto.subtle.importKey("raw", raw, { name: "AES-GCM", length: 256 }, true, [
+    "encrypt",
+    "decrypt",
+  ]);
 }
 
 export async function createRecoveryBundle(
@@ -167,9 +161,6 @@ export function verifyConfirmationWords(
   const words = normalizeMnemonic(mnemonic).split(" ");
   return answers.every(({ index, word }) => {
     const expected = words[index];
-    return (
-      typeof expected === "string" &&
-      expected === word.trim().toLowerCase()
-    );
+    return typeof expected === "string" && expected === word.trim().toLowerCase();
   });
 }

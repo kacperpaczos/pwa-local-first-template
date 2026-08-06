@@ -144,7 +144,9 @@ const ModelPanel: Component<ModelPanelProps> = (props) => {
           variant="outline"
           data-testid="ai-clear-cache"
           disabled={
-            props.pending() || props.status().kind === "busy" || props.status().kind === "downloading"
+            props.pending() ||
+            props.status().kind === "busy" ||
+            props.status().kind === "downloading"
           }
           onClick={() => props.onClearCache()}
         >
@@ -166,14 +168,16 @@ const ModelPanel: Component<ModelPanelProps> = (props) => {
       </Show>
 
       <Show when={props.downloading()}>
-        {(s) => <Progress value={Math.round(s().progress * 100)} data-testid="ai-download-progress" />}
+        {(s) => (
+          <Progress value={Math.round(s().progress * 100)} data-testid="ai-download-progress" />
+        )}
       </Show>
 
       <div class="rounded-md border bg-muted/20 p-3 text-sm" data-testid="ai-telemetry">
         <p class="font-medium">Local telemetry</p>
         <p class="text-muted-foreground">
-          Inferences: {props.telemetry().inferCount} · Errors: {props.telemetry().errorCount} · Last:{" "}
-          {props.telemetry().lastMs == null ? "—" : `${props.telemetry().lastMs} ms`}
+          Inferences: {props.telemetry().inferCount} · Errors: {props.telemetry().errorCount} ·
+          Last: {props.telemetry().lastMs == null ? "—" : `${props.telemetry().lastMs} ms`}
         </p>
         <p class="mt-1 text-xs text-muted-foreground">
           Model unloads from GPU after 10 minutes of inactivity. Cached weights stay on disk until

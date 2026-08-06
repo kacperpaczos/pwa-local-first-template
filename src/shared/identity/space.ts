@@ -17,9 +17,7 @@ function newSpaceId(): string {
   return crypto.randomUUID();
 }
 
-export function loadSpaceId(
-  storage: Pick<Storage, "getItem"> = localStorage,
-): string | null {
+export function loadSpaceId(storage: Pick<Storage, "getItem"> = localStorage): string | null {
   return storage.getItem(SPACE_ID_STORAGE_KEY);
 }
 
@@ -34,9 +32,7 @@ export async function ensureSpace(
   }
 
   const spaceId = existingId ?? newSpaceId();
-  const key = existingKey
-    ? await importSpaceKey(existingKey)
-    : await generateSpaceKey();
+  const key = existingKey ? await importSpaceKey(existingKey) : await generateSpaceKey();
   const exported = existingKey ?? (await exportSpaceKey(key));
 
   storage.setItem(SPACE_ID_STORAGE_KEY, spaceId);
@@ -73,9 +69,7 @@ export function saveSpaceExported(
   storage.setItem(SPACE_KEY_STORAGE_KEY, spaceKeyB64);
 }
 
-export function clearSpace(
-  storage: Pick<Storage, "removeItem"> = localStorage,
-): void {
+export function clearSpace(storage: Pick<Storage, "removeItem"> = localStorage): void {
   storage.removeItem(SPACE_ID_STORAGE_KEY);
   storage.removeItem(SPACE_KEY_STORAGE_KEY);
 }

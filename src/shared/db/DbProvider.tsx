@@ -55,17 +55,12 @@ export const DbProvider: ParentComponent = (props) => {
     // comes from local note Lamport clocks (buildCheckpoint), not the
     // transport's sync cursor — the two live in unrelated numbering spaces.
     const coveredSeq = buildCheckpoint(db.notes).seqCovered;
-    void gcTombstones(
-      db.notes,
-      coveredSeq > 0 ? { coveredSeq } : {},
-    ).catch(() => {
+    void gcTombstones(db.notes, coveredSeq > 0 ? { coveredSeq } : {}).catch(() => {
       /* GC is best-effort */
     });
 
     void db.pullRemote().catch(() => {
-      setSyncStatus(
-        typeof navigator !== "undefined" && !navigator.onLine ? "offline" : "idle",
-      );
+      setSyncStatus(typeof navigator !== "undefined" && !navigator.onLine ? "offline" : "idle");
     });
     const facade = createPersistenceFacade(db);
     // Expose for DEV tooling and Playwright e2e (VITE_E2E=1 in the e2e build).
@@ -108,9 +103,7 @@ export const DbProvider: ParentComponent = (props) => {
           </main>
         }
       >
-        {(value) => (
-          <DbContext.Provider value={value()}>{props.children}</DbContext.Provider>
-        )}
+        {(value) => <DbContext.Provider value={value()}>{props.children}</DbContext.Provider>}
       </Show>
     </Show>
   );

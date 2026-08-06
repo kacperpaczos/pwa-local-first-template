@@ -80,7 +80,11 @@ describe("parseBackupFile", () => {
 
   it("accepts a well-formed backup", () => {
     const note = makeNote();
-    const backup: Backup = { formatVersion: 1, exportedAt: "2026-01-01T00:00:00.000Z", notes: [note] };
+    const backup: Backup = {
+      formatVersion: 1,
+      exportedAt: "2026-01-01T00:00:00.000Z",
+      notes: [note],
+    };
     expect(parseBackupFile(JSON.stringify(backup))).toEqual(backup);
   });
 });
@@ -94,7 +98,11 @@ describe("importBackup", () => {
     const notes = fakeCollection<Note>();
     const syncMeta = fakeCollection();
     const note = makeNote({ title: "from backup" });
-    const backup: Backup = { formatVersion: 1, exportedAt: "2026-01-01T00:00:00.000Z", notes: [note] };
+    const backup: Backup = {
+      formatVersion: 1,
+      exportedAt: "2026-01-01T00:00:00.000Z",
+      notes: [note],
+    };
 
     const summary = await importBackup(
       { notes: notes as never, syncMeta: syncMeta as never },
@@ -110,14 +118,26 @@ describe("importBackup", () => {
     const notes = fakeCollection<Note>();
     const syncMeta = fakeCollection();
     const note = makeNote({ title: "stable" });
-    const backup: Backup = { formatVersion: 1, exportedAt: "2026-01-01T00:00:00.000Z", notes: [note] };
+    const backup: Backup = {
+      formatVersion: 1,
+      exportedAt: "2026-01-01T00:00:00.000Z",
+      notes: [note],
+    };
     const mutex = new SyncMutex();
 
-    const first = await importBackup({ notes: notes as never, syncMeta: syncMeta as never }, mutex, backup);
+    const first = await importBackup(
+      { notes: notes as never, syncMeta: syncMeta as never },
+      mutex,
+      backup,
+    );
     expect(first.applied).toBe(1);
     expect(notes.toArray).toHaveLength(1);
 
-    const second = await importBackup({ notes: notes as never, syncMeta: syncMeta as never }, mutex, backup);
+    const second = await importBackup(
+      { notes: notes as never, syncMeta: syncMeta as never },
+      mutex,
+      backup,
+    );
     expect(second.applied).toBe(0); // merge saw identical data — no-op, not a duplicate row
     expect(notes.toArray).toHaveLength(1);
     expect(notes.get(note.id)?.title).toBe("stable");
@@ -129,7 +149,11 @@ describe("importBackup", () => {
     const backedUp = makeNote({ title: "old title", title_lamport: 1 });
     notes.insert({ ...backedUp, title: "newer local title", title_lamport: 9 });
 
-    const backup: Backup = { formatVersion: 1, exportedAt: "2026-01-01T00:00:00.000Z", notes: [backedUp] };
+    const backup: Backup = {
+      formatVersion: 1,
+      exportedAt: "2026-01-01T00:00:00.000Z",
+      notes: [backedUp],
+    };
     await importBackup(
       { notes: notes as never, syncMeta: syncMeta as never },
       new SyncMutex(),
@@ -143,7 +167,11 @@ describe("importBackup", () => {
     const notes = fakeCollection<Note>();
     const syncMeta = fakeCollection();
     const note = makeNote({ title: "from backup" });
-    const backup: Backup = { formatVersion: 1, exportedAt: "2026-01-01T00:00:00.000Z", notes: [note] };
+    const backup: Backup = {
+      formatVersion: 1,
+      exportedAt: "2026-01-01T00:00:00.000Z",
+      notes: [note],
+    };
     const mutex = new SyncMutex();
 
     let releaseHolder!: () => void;
