@@ -1,9 +1,6 @@
 import { atom } from "nanostores";
 import { resolveAiModelId, type AiTier } from "./config";
-import {
-  retrieveRankedChunks,
-  type NoteForSearch,
-} from "./embeddings";
+import { retrieveRankedChunks, type NoteForSearch } from "./embeddings";
 import {
   filterChunksByThreshold,
   NO_COVERAGE_ANSWER,
@@ -246,10 +243,7 @@ export async function warmupAi(): Promise<void> {
  * Weights stay on disk after the first successful download. Later clicks only
  * reload the model into GPU memory (much faster when cache hits).
  */
-export async function downloadAiModel(
-  signal?: AbortSignal,
-  tier?: AiTier,
-): Promise<void> {
+export async function downloadAiModel(signal?: AbortSignal, tier?: AiTier): Promise<void> {
   const status = aiStatusStore.get();
   if (status.kind === "ready" || status.kind === "busy") {
     touchAiActivity();

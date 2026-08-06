@@ -2,12 +2,7 @@ import { For, Show, createMemo, createSignal, type Component } from "solid-js";
 import { useStore } from "@nanostores/solid";
 import { useLiveQuery } from "@tanstack/solid-db";
 import { RefreshCw, Sparkles, Tags, Trash2 } from "lucide-solid";
-import {
-  aiStatusStore,
-  suggestMetaWithAi,
-  summarizeWithAi,
-  type SuggestedMeta,
-} from "@/ai";
+import { aiStatusStore, suggestMetaWithAi, summarizeWithAi, type SuggestedMeta } from "@/ai";
 import { useDb } from "@/shared/db/DbProvider";
 import type { Note } from "@/shared/db/schemas";
 import { listConflicts } from "@/shared/sync/conflict-log";
@@ -291,7 +286,10 @@ const NotesPage: Component = () => {
 
             <Show when={aiReady() && selectedNote()}>
               {(note) => (
-                <div class="space-y-2 rounded-md border bg-muted/20 p-3" data-testid="note-ai-actions">
+                <div
+                  class="space-y-2 rounded-md border bg-muted/20 p-3"
+                  data-testid="note-ai-actions"
+                >
                   <p class="text-xs text-muted-foreground">
                     Selected: <span class="font-medium text-foreground">{note().title}</span>
                   </p>
@@ -372,6 +370,7 @@ const NotesPage: Component = () => {
                 <ul class="space-y-3" data-testid="notes-list">
                   <For each={visibleNotes()}>
                     {(note) => (
+                      // biome-ignore lint/a11y/useKeyWithClickEvents: pointer-only hit-area convenience; the title button inside is the accessible control
                       <li
                         class="rounded-lg border border-border bg-muted/30 p-3"
                         classList={{
@@ -383,7 +382,16 @@ const NotesPage: Component = () => {
                       >
                         <div class="mb-1 flex items-start justify-between gap-2">
                           <h3 class="font-medium leading-snug">
-                            {note.title}
+                            <button
+                              type="button"
+                              class="text-left"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                onSelectNote(note);
+                              }}
+                            >
+                              {note.title}
+                            </button>
                             <Show when={note.deleted_at}>
                               <span class="text-muted-foreground"> (deleted)</span>
                             </Show>
@@ -414,7 +422,9 @@ const NotesPage: Component = () => {
                           </Show>
                         </div>
                         <Show when={note.body}>
-                          <p class="whitespace-pre-wrap text-sm text-muted-foreground">{note.body}</p>
+                          <p class="whitespace-pre-wrap text-sm text-muted-foreground">
+                            {note.body}
+                          </p>
                         </Show>
                       </li>
                     )}

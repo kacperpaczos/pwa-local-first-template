@@ -5,7 +5,7 @@ import { parseNote } from "../db/schemas";
 import { nextLamport } from "../db/lamport";
 import type { SyncMeta } from "../db/sync-meta";
 import { SYNC_META_ID } from "../db/sync-meta";
-import { parseSyncMutation } from "./protocol";
+import { parseSyncMutation, type ValidatedSyncMutation } from "./protocol";
 import { mergeNote } from "./merge-note";
 import type { SyncMutation } from "./transport";
 import { setSyncStatus, syncStatusStore } from "./status";
@@ -15,10 +15,7 @@ export type SyncApplyTarget = {
   syncMeta: Collection<SyncMeta, string>;
 };
 
-async function persistLocal(
-  notes: Collection<Note, string>,
-  mutate: () => void,
-): Promise<void> {
+async function persistLocal(notes: Collection<Note, string>, mutate: () => void): Promise<void> {
   const tx = createTransaction({
     autoCommit: false,
     mutationFn: async ({ transaction }) => {
@@ -50,7 +47,7 @@ export async function applyRemoteMutations(
   let applied = 0;
 
   for (const raw of mutations) {
-    let validated;
+    let validated: ValidatedSyncMutation;
     try {
       validated = parseSyncMutation(raw);
     } catch {

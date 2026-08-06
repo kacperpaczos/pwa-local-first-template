@@ -53,9 +53,7 @@ export async function resolveAiAppConfig(tier?: AiTier): Promise<AppConfig> {
  * Best-effort wipe of WebLLM model artifacts from both cache backends,
  * plus Cache API keys whose names look like webllm/mlc leftovers.
  */
-export async function clearAiModelCacheBackends(
-  tier?: AiTier,
-): Promise<{
+export async function clearAiModelCacheBackends(tier?: AiTier): Promise<{
   cleared: boolean;
   detail: string;
 }> {

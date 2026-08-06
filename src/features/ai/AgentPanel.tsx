@@ -38,7 +38,9 @@ const AgentPanel: Component<AgentPanelProps> = (props) => {
           <For each={props.skills}>{(skill) => <option value={skill.id}>{skill.name}</option>}</For>
         </select>
       </label>
-      <Show when={props.selectedSkill()}>{(skill) => <p class="text-xs text-muted-foreground">{skill().description}</p>}</Show>
+      <Show when={props.selectedSkill()}>
+        {(skill) => <p class="text-xs text-muted-foreground">{skill().description}</p>}
+      </Show>
       <TextField>
         <TextFieldLabel>Task</TextFieldLabel>
         <TextFieldTextArea
@@ -59,7 +61,10 @@ const AgentPanel: Component<AgentPanelProps> = (props) => {
         Run agent
       </Button>
       <Show when={props.agentAnswer()}>
-        <p class="whitespace-pre-wrap rounded-md border bg-muted/30 p-3 text-sm" data-testid="ai-agent-output">
+        <p
+          class="whitespace-pre-wrap rounded-md border bg-muted/30 p-3 text-sm"
+          data-testid="ai-agent-output"
+        >
           {props.agentAnswer()}
         </p>
       </Show>

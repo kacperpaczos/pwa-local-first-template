@@ -12,13 +12,7 @@ import {
 } from "./protocol";
 import { setSyncStatus } from "./status";
 import { NoopSyncTransport } from "./noop-transport";
-import type {
-  Conflict,
-  PullResult,
-  PushResult,
-  SyncMutation,
-  SyncTransport,
-} from "./transport";
+import type { Conflict, PullResult, PushResult, SyncMutation, SyncTransport } from "./transport";
 
 export type GunWireMutation = ValidatedSyncMutation & {
   seq: number;
@@ -432,9 +426,7 @@ export function parseGunPeers(raw: string | undefined): string[] {
 export function createSyncTransport(): SyncTransport {
   const peers = parseGunPeers(import.meta.env.VITE_GUN_PEERS as string | undefined);
   const fallbackPeers =
-    peers.length === 0 && import.meta.env.DEV
-      ? ["http://127.0.0.1:8765/gun"]
-      : peers;
+    peers.length === 0 && import.meta.env.DEV ? ["http://127.0.0.1:8765/gun"] : peers;
 
   if (fallbackPeers.length === 0) {
     return new NoopSyncTransport();

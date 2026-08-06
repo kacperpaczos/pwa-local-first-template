@@ -18,7 +18,7 @@ export default defineConfig({
   },
   webServer: {
     command:
-      "pnpm build && pnpm exec concurrently -k -s first -n gun,web \"GUN_PEER_TEST_MODE=1 pnpm dev:gun-peer\" \"pnpm preview --host 127.0.0.1 --port 4173\"",
+      'pnpm build && pnpm exec concurrently -k -s first -n gun,web "GUN_PEER_TEST_MODE=1 pnpm dev:gun-peer" "pnpm preview --host 127.0.0.1 --port 4173"',
     url: "http://127.0.0.1:4173",
     reuseExistingServer: false,
     timeout: 180_000,

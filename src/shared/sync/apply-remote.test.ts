@@ -30,11 +30,7 @@ vi.mock("@tanstack/db", () => ({
   },
 }));
 
-import {
-  applyRemoteMutations,
-  readSyncCursor,
-  writeSyncCursor,
-} from "./apply-remote";
+import { applyRemoteMutations, readSyncCursor, writeSyncCursor } from "./apply-remote";
 
 function makeNote(partial: Partial<Note> = {}): Note {
   const body = createBodyDoc(partial.body ?? "body");

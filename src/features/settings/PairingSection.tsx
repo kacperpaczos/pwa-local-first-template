@@ -13,12 +13,22 @@ import {
   type PairingPayload,
 } from "@/shared/identity";
 import { createAsyncAction } from "@/shared/lib/async-action";
-import { pubPreviewStore, setPubPreview, setSpacePreview, spacePreviewStore } from "./identity-preview";
+import {
+  pubPreviewStore,
+  setPubPreview,
+  setSpacePreview,
+  spacePreviewStore,
+} from "./identity-preview";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { TextField, TextFieldInput, TextFieldLabel, TextFieldTextArea } from "@/components/ui/text-field";
+import {
+  TextField,
+  TextFieldInput,
+  TextFieldLabel,
+  TextFieldTextArea,
+} from "@/components/ui/text-field";
 
 const PairingSection: Component = () => {
   const { db } = useDb();
@@ -139,7 +149,10 @@ const PairingSection: Component = () => {
             <div class="space-y-3 rounded-lg border p-3" data-testid="pairing-qr-wrap">
               <Show when={sasDigits()}>
                 {(sas) => (
-                  <p class="text-center font-mono text-2xl tracking-[0.3em]" data-testid="pairing-sas">
+                  <p
+                    class="text-center font-mono text-2xl tracking-[0.3em]"
+                    data-testid="pairing-sas"
+                  >
                     {sas()}
                   </p>
                 )}
@@ -208,15 +221,18 @@ const PairingSection: Component = () => {
           <div class="space-y-3 rounded-lg border p-3" data-testid="pairing-import-confirm">
             <Show when={importSasDigits()}>
               {(sas) => (
-                <p class="text-center font-mono text-2xl tracking-[0.3em]" data-testid="pairing-import-sas">
+                <p
+                  class="text-center font-mono text-2xl tracking-[0.3em]"
+                  data-testid="pairing-import-sas"
+                >
                   {sas()}
                 </p>
               )}
             </Show>
             <p class="text-center text-xs text-muted-foreground">
-              This is what the pasted code says its SAS is — it does NOT prove who sent it. Ask
-              the other device's owner for their SAS (voice, in person) and type it below; it
-              must match before anything is imported.
+              This is what the pasted code says its SAS is — it does NOT prove who sent it. Ask the
+              other device's owner for their SAS (voice, in person) and type it below; it must match
+              before anything is imported.
             </p>
             <TextField>
               <TextFieldLabel>SAS from the other device</TextFieldLabel>

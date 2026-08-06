@@ -81,7 +81,10 @@ describe("gcTombstones", () => {
     const active = makeNote({ id: "active" });
     const notes = fakeNotes([oldDeleted, recentDeleted, active]);
 
-    const removed = await gcTombstones(notes as never, { now, retentionMs: TOMBSTONE_RETENTION_MS });
+    const removed = await gcTombstones(notes as never, {
+      now,
+      retentionMs: TOMBSTONE_RETENTION_MS,
+    });
 
     expect(removed).toBe(1);
     expect(notes.get("old")).toBeUndefined();

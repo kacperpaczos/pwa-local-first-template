@@ -1,10 +1,6 @@
 import SEA from "gun/sea";
 import { parseJsonOrThrow } from "@/shared/lib/json";
-import {
-  IDENTITY_STORAGE_KEY,
-  type IdentityPayload,
-  type SeaPair,
-} from "./types";
+import { IDENTITY_STORAGE_KEY, type IdentityPayload, type SeaPair } from "./types";
 
 function isSeaPair(value: unknown): value is SeaPair {
   if (!value || typeof value !== "object") return false;
@@ -34,9 +30,7 @@ export function parseIdentityJson(text: string): IdentityPayload {
   return parseIdentityPayload(parseJsonOrThrow(text, "Identity JSON is not valid"));
 }
 
-export function loadStoredPair(
-  storage: Pick<Storage, "getItem"> = localStorage,
-): SeaPair | null {
+export function loadStoredPair(storage: Pick<Storage, "getItem"> = localStorage): SeaPair | null {
   const raw = storage.getItem(IDENTITY_STORAGE_KEY);
   if (!raw) return null;
   try {
@@ -46,17 +40,12 @@ export function loadStoredPair(
   }
 }
 
-export function savePair(
-  pair: SeaPair,
-  storage: Pick<Storage, "setItem"> = localStorage,
-): void {
+export function savePair(pair: SeaPair, storage: Pick<Storage, "setItem"> = localStorage): void {
   const payload: IdentityPayload = { v: 1, pair };
   storage.setItem(IDENTITY_STORAGE_KEY, JSON.stringify(payload));
 }
 
-export function clearStoredPair(
-  storage: Pick<Storage, "removeItem"> = localStorage,
-): void {
+export function clearStoredPair(storage: Pick<Storage, "removeItem"> = localStorage): void {
   storage.removeItem(IDENTITY_STORAGE_KEY);
 }
 

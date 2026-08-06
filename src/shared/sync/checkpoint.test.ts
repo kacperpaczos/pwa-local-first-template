@@ -59,9 +59,7 @@ describe("buildCheckpoint", () => {
 describe("sealCheckpoint / openCheckpoint", () => {
   it("round-trips through envelope crypto", async () => {
     const key = await generateSpaceKey();
-    const checkpoint = buildCheckpoint([
-      note({ id: "n1", title: "hello", title_lamport: 5 }),
-    ]);
+    const checkpoint = buildCheckpoint([note({ id: "n1", title: "hello", title_lamport: 5 })]);
     const sealed = await sealCheckpoint(checkpoint, key);
     expect(sealed.nonce.length).toBeGreaterThan(0);
     expect(sealed.ciphertext.length).toBeGreaterThan(0);

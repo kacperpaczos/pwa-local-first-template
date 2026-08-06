@@ -1,10 +1,6 @@
 import * as z from "zod/mini";
 import { semanticSearch, type NoteForSearch } from "../embeddings";
-import {
-  degradeIfBadCitations,
-  NO_COVERAGE_ANSWER,
-  tryParseGroundedAnswer,
-} from "../grounding";
+import { degradeIfBadCitations, NO_COVERAGE_ANSWER, tryParseGroundedAnswer } from "../grounding";
 import type { AiProvider } from "../types";
 import { filterToolsBySkill, type Skill } from "./skills";
 
@@ -159,18 +155,12 @@ async function planNext(
     };
   }
 
-  const toolCatalog = tools
-    .map((t) => `- ${t.name}: ${t.description}`)
-    .join("\n");
+  const toolCatalog = tools.map((t) => `- ${t.name}: ${t.description}`).join("\n");
   const skillBlock = skill
     ? `Skill: ${skill.name}\n${skill.instructions_md}`
     : "No skill selected.";
   const historyBlock =
-    history.length === 0
-      ? "(none)"
-      : history
-          .map((s) => JSON.stringify(s))
-          .join("\n");
+    history.length === 0 ? "(none)" : history.map((s) => JSON.stringify(s)).join("\n");
 
   const prompt = [
     "You are an on-device note agent. Reply with ONLY JSON:",

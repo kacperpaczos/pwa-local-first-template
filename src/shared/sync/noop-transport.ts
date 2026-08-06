@@ -1,10 +1,4 @@
-import type {
-  Conflict,
-  PullResult,
-  PushResult,
-  SyncMutation,
-  SyncTransport,
-} from "./transport";
+import type { Conflict, PullResult, PushResult, SyncMutation, SyncTransport } from "./transport";
 
 /** Local-only transport — accepts everything, returns empty pulls. */
 export class NoopSyncTransport implements SyncTransport {

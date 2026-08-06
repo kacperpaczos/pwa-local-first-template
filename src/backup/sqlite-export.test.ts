@@ -3,9 +3,7 @@ import { exportDatabaseAsSql, sqliteDumpFileName } from "./sqlite-export";
 
 describe("sqliteDumpFileName", () => {
   it("uses .sql extension", () => {
-    expect(sqliteDumpFileName(new Date("2026-01-02T03:04:05.678Z"))).toMatch(
-      /\.sql$/,
-    );
+    expect(sqliteDumpFileName(new Date("2026-01-02T03:04:05.678Z"))).toMatch(/\.sql$/);
   });
 });
 
@@ -18,7 +16,11 @@ describe("exportDatabaseAsSql", () => {
     const db = {
       rawDb: {
         execute: async (sql: string) => {
-          if (sql.includes("sqlite_master") && sql.includes("type='table'") && sql.includes("ORDER BY")) {
+          if (
+            sql.includes("sqlite_master") &&
+            sql.includes("type='table'") &&
+            sql.includes("ORDER BY")
+          ) {
             return tables;
           }
           if (sql.includes("SELECT sql FROM sqlite_master")) {

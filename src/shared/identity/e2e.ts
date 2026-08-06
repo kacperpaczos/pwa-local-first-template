@@ -1,8 +1,4 @@
-import {
-  exportIdentityJson,
-  importIdentityJson,
-  loadStoredPair,
-} from "./pair";
+import { exportIdentityJson, importIdentityJson, loadStoredPair } from "./pair";
 import type { SeaPair } from "./types";
 
 type IdentityE2eHooks = {

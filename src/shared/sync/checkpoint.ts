@@ -28,9 +28,7 @@ function maxNoteLamport(notes: readonly Note[]): number {
 }
 
 function asNoteArray(notes: Collection<Note, string> | readonly Note[]): Note[] {
-  const rows = Array.isArray(notes)
-    ? notes
-    : (notes as Collection<Note, string>).toArray;
+  const rows = Array.isArray(notes) ? notes : (notes as Collection<Note, string>).toArray;
   return rows.map((note) => noteSchema.parse(note));
 }
 
@@ -61,10 +59,7 @@ export async function sealCheckpoint(
   return seal(plaintext, spaceKey, CHECKPOINT_AAD);
 }
 
-export async function openCheckpoint(
-  sealed: SealedBlob,
-  spaceKey: CryptoKey,
-): Promise<Checkpoint> {
+export async function openCheckpoint(sealed: SealedBlob, spaceKey: CryptoKey): Promise<Checkpoint> {
   const opened = await open(sealed, spaceKey, CHECKPOINT_AAD);
   const raw = JSON.parse(new TextDecoder().decode(opened)) as unknown;
   if (!raw || typeof raw !== "object") {
@@ -84,9 +79,7 @@ export async function openCheckpoint(
   };
 }
 
-function readStored(
-  storage: Pick<Storage, "getItem">,
-): StoredCheckpoint[] {
+function readStored(storage: Pick<Storage, "getItem">): StoredCheckpoint[] {
   try {
     const raw = storage.getItem(CHECKPOINT_STORAGE_KEY);
     if (!raw) return [];

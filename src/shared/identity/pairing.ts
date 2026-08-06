@@ -13,17 +13,12 @@ export type PairingPayload = {
   sasDigits: string;
 };
 
-export async function deriveSasDigits(
-  spaceId: string,
-  pubs: readonly string[],
-): Promise<string> {
+export async function deriveSasDigits(spaceId: string, pubs: readonly string[]): Promise<string> {
   const material = [spaceId, ...[...pubs].sort()].join("|");
   const digest = new Uint8Array(
     await crypto.subtle.digest("SHA-256", new TextEncoder().encode(material)),
   );
-  const n =
-    ((digest[0]! << 24) | (digest[1]! << 16) | (digest[2]! << 8) | digest[3]!) >>>
-    0;
+  const n = ((digest[0]! << 24) | (digest[1]! << 16) | (digest[2]! << 8) | digest[3]!) >>> 0;
   return String(n % 1_000_000).padStart(6, "0");
 }
 
@@ -100,9 +95,7 @@ export function parsePairingJson(text: string): PairingPayload {
  * {@link commitPairingPayload} — see its doc comment for why that step is
  * the one that actually matters.
  */
-export async function previewPairingPayload(
-  raw: string | PairingPayload,
-): Promise<PairingPayload> {
+export async function previewPairingPayload(raw: string | PairingPayload): Promise<PairingPayload> {
   const payload = typeof raw === "string" ? parsePairingJson(raw) : parsePairingPayload(raw);
 
   // Validate key material shape without persisting it.

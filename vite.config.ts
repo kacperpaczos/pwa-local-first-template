@@ -89,8 +89,7 @@ export default defineConfig({
         runtimeCaching: [
           {
             urlPattern: ({ request }) =>
-              request.destination === "worker" ||
-              request.url.includes(".wasm"),
+              request.destination === "worker" || request.url.includes(".wasm"),
             handler: "CacheFirst",
             options: {
               cacheName: "wasm-and-workers",

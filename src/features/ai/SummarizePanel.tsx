@@ -35,7 +35,10 @@ const SummarizePanel: Component<SummarizePanelProps> = (props) => {
         Summarize
       </Button>
       <Show when={props.summary()}>
-        <p class="whitespace-pre-wrap rounded-md border bg-muted/30 p-3 text-sm" data-testid="ai-summary-output">
+        <p
+          class="whitespace-pre-wrap rounded-md border bg-muted/30 p-3 text-sm"
+          data-testid="ai-summary-output"
+        >
           {props.summary()}
         </p>
       </Show>

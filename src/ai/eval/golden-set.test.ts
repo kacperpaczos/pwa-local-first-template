@@ -6,11 +6,7 @@ import {
   degradeIfBadCitations,
   verifyQuote,
 } from "../grounding";
-import {
-  GOLDEN_SET,
-  matchesNoCoverage,
-  type GoldenCase,
-} from "./golden-set";
+import { GOLDEN_SET, matchesNoCoverage, type GoldenCase } from "./golden-set";
 
 type MockChunk = { noteId: string; text: string; score: number };
 

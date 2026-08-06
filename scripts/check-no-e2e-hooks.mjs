@@ -50,6 +50,4 @@ if (hits.length > 0) {
   process.exit(1);
 }
 
-console.log(
-  `OK: ${FORBIDDEN.join(", ")} not found in ${files.length} production bundle file(s).`,
-);
+console.log(`OK: ${FORBIDDEN.join(", ")} not found in ${files.length} production bundle file(s).`);

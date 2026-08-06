@@ -38,7 +38,11 @@ test("soft-delete on A syncs to B; tombstone visible under Wszystkie", async ({ 
   await syncNow(pageB);
   await expectNoteVisible(pageB, title, 30_000);
 
-  await pageA.getByTestId("note-item").filter({ hasText: title }).getByTestId("note-delete").click();
+  await pageA
+    .getByTestId("note-item")
+    .filter({ hasText: title })
+    .getByTestId("note-delete")
+    .click();
   await expectNoteHidden(pageA, title);
   await waitForNoteSynced(pageA, title);
 

@@ -11,11 +11,10 @@ export type SealedBlob = {
 
 /** AES-256-GCM content key for a shared sync space. */
 export async function generateSpaceKey(): Promise<CryptoKey> {
-  return crypto.subtle.generateKey(
-    { name: AES_ALG, length: KEY_BITS },
-    true,
-    ["encrypt", "decrypt"],
-  );
+  return crypto.subtle.generateKey({ name: AES_ALG, length: KEY_BITS }, true, [
+    "encrypt",
+    "decrypt",
+  ]);
 }
 
 export async function exportSpaceKey(key: CryptoKey): Promise<string> {
@@ -28,13 +27,10 @@ export async function importSpaceKey(b64: string): Promise<CryptoKey> {
   if (raw.byteLength !== 32) {
     throw new Error("Invalid space key length");
   }
-  return crypto.subtle.importKey(
-    "raw",
-    raw,
-    { name: AES_ALG, length: KEY_BITS },
-    true,
-    ["encrypt", "decrypt"],
-  );
+  return crypto.subtle.importKey("raw", raw, { name: AES_ALG, length: KEY_BITS }, true, [
+    "encrypt",
+    "decrypt",
+  ]);
 }
 
 export async function seal(

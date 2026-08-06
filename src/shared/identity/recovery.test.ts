@@ -99,15 +99,14 @@ describe("recovery", () => {
     expect(indices).toHaveLength(3);
     expect(new Set(indices).size).toBe(3);
 
-    const phrase = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+    const phrase =
+      "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
     expect(
       verifyConfirmationWords(phrase, [
         { index: 0, word: "abandon" },
         { index: 11, word: "about" },
       ]),
     ).toBe(true);
-    expect(
-      verifyConfirmationWords(phrase, [{ index: 0, word: "wrong" }]),
-    ).toBe(false);
+    expect(verifyConfirmationWords(phrase, [{ index: 0, word: "wrong" }])).toBe(false);
   });
 });

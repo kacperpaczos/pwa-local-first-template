@@ -31,7 +31,9 @@ export type AppDatabase = {
   transport: SyncTransport;
   syncMutex: SyncMutex;
   /** Raw wa-sqlite handle — integrity checks and SQL dump export. */
-  rawDb: { execute: <TRow = unknown>(sql: string, params?: readonly unknown[]) => Promise<readonly TRow[]> };
+  rawDb: {
+    execute: <TRow = unknown>(sql: string, params?: readonly unknown[]) => Promise<readonly TRow[]>;
+  };
   pullRemote: () => Promise<void>;
   /** Close the current Gun transport and open a fresh one (post identity import). */
   reinitSyncTransport: () => Promise<void>;
@@ -67,9 +69,7 @@ export function mutationsFromTransaction(
 ): SyncMutation[] {
   return mutations.map((mutation, index) => {
     const payload =
-      mutation.type === "delete"
-        ? mutation.original
-        : (mutation.modified ?? mutation.original);
+      mutation.type === "delete" ? mutation.original : (mutation.modified ?? mutation.original);
 
     return {
       idempotencyKey: `${idempotencyKey}:${index}`,

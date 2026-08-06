@@ -55,7 +55,7 @@ function createFakeGun() {
             }
             set.add(listener);
             for (const [full, data] of store) {
-              if (!full.startsWith(parent + "/") && full !== parent) continue;
+              if (!full.startsWith(`${parent}/`) && full !== parent) continue;
               const key = full.slice(parent.length + 1);
               if (key && !key.includes("/")) {
                 listener(data, key);
@@ -101,10 +101,7 @@ const sampleNote = {
 
 describe("parseGunPeers", () => {
   it("splits and trims peer URLs", () => {
-    expect(parseGunPeers(" http://a/gun ,http://b/gun ")).toEqual([
-      "http://a/gun",
-      "http://b/gun",
-    ]);
+    expect(parseGunPeers(" http://a/gun ,http://b/gun ")).toEqual(["http://a/gun", "http://b/gun"]);
     expect(parseGunPeers("")).toEqual([]);
     expect(parseGunPeers(undefined)).toEqual([]);
   });
@@ -373,20 +370,15 @@ describe("GunSyncTransport", () => {
 
     // Inject a legacy SEA-encrypted row alongside space-sealed traffic.
     const legacyCt = await SEA.encrypt(sampleNote, pair);
-    fake
-      .user()
-      .get("app_sync")
-      .get("notes")
-      .get("legacy-k")
-      .put({
-        v: PROTOCOL_VERSION,
-        idempotencyKey: "legacy-k",
-        entity: "notes",
-        op: "upsert",
-        ciphertext: legacyCt,
-        seq: 99,
-        origin: "device-b",
-      });
+    fake.user().get("app_sync").get("notes").get("legacy-k").put({
+      v: PROTOCOL_VERSION,
+      idempotencyKey: "legacy-k",
+      entity: "notes",
+      op: "upsert",
+      ciphertext: legacyCt,
+      seq: 99,
+      origin: "device-b",
+    });
 
     const reader = new GunSyncTransport({
       peers: ["http://fake/gun"],

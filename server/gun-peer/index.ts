@@ -6,8 +6,7 @@ import Gun from "gun";
 
 const PORT = Number(process.env.GUN_PEER_PORT ?? 8765);
 const HOST = process.env.GUN_PEER_HOST ?? "127.0.0.1";
-const TEST_MODE =
-  process.env.GUN_PEER_TEST_MODE === "1" || process.env.NODE_ENV === "test";
+const TEST_MODE = process.env.GUN_PEER_TEST_MODE === "1" || process.env.NODE_ENV === "test";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(__dirname, TEST_MODE ? ".gun-test-data" : ".gun-data");

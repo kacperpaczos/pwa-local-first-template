@@ -61,17 +61,11 @@ function readAll(storage: Pick<Storage, "getItem">): ConflictEntry[] {
   }
 }
 
-function writeAll(
-  entries: ConflictEntry[],
-  storage: Pick<Storage, "setItem">,
-): void {
+function writeAll(entries: ConflictEntry[], storage: Pick<Storage, "setItem">): void {
   storage.setItem(CONFLICT_LOG_STORAGE_KEY, JSON.stringify(entries));
 }
 
-function prune(
-  entries: ConflictEntry[],
-  nowMs: number,
-): ConflictEntry[] {
+function prune(entries: ConflictEntry[], nowMs: number): ConflictEntry[] {
   const cutoff = nowMs - CONFLICT_LOG_RETENTION_MS;
   return entries
     .filter((e) => {

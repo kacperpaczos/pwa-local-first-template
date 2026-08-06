@@ -16,8 +16,8 @@ describe("entity registry", () => {
   it("throws when registering the same entity twice", () => {
     registerEntitySchema("gadget", { parse: (data: unknown) => data });
 
-    expect(() =>
-      registerEntitySchema("gadget", { parse: (data: unknown) => data }),
-    ).toThrow(/already registered/);
+    expect(() => registerEntitySchema("gadget", { parse: (data: unknown) => data })).toThrow(
+      /already registered/,
+    );
   });
 });

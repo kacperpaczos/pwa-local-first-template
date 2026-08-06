@@ -1,11 +1,5 @@
 import { buildGroundedSystemPrompt } from "./grounding";
-import type {
-  AiProvider,
-  GenOpts,
-  InitProgress,
-  NoteChunk,
-  SuggestedMeta,
-} from "./types";
+import type { AiProvider, GenOpts, InitProgress, NoteChunk, SuggestedMeta } from "./types";
 import { parseSuggestedMeta } from "./types";
 import {
   mapInitProgress,

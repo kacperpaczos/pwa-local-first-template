@@ -86,7 +86,10 @@ const AppShell: Component<ParentProps> = (props) => {
     <SidebarProvider>
       <Sidebar collapsible="offcanvas" variant="sidebar">
         <SidebarHeader class="gap-2 px-3 py-3">
-          <A href="/" class="flex min-w-0 items-center gap-2 rounded-md outline-none ring-sidebar-ring focus-visible:ring-2">
+          <A
+            href="/"
+            class="flex min-w-0 items-center gap-2 rounded-md outline-none ring-sidebar-ring focus-visible:ring-2"
+          >
             <div class="flex size-8 shrink-0 items-center justify-center rounded-md bg-sidebar-primary text-sidebar-primary-foreground text-xs font-bold">
               LF
             </div>

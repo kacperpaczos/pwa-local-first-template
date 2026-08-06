@@ -1,12 +1,7 @@
 import type { EmbeddingProvider, NoteChunk } from "../types";
 import { HashEmbeddingProvider } from "./hash-provider";
 import { topK } from "./similarity";
-import {
-  getStoredEmbedding,
-  hashBody,
-  putStoredEmbedding,
-  storageKey,
-} from "./store";
+import { getStoredEmbedding, hashBody, putStoredEmbedding, storageKey } from "./store";
 
 export { HashEmbeddingProvider, HASH_EMBEDDING_DIMS, embedOne } from "./hash-provider";
 export { cosineSimilarity, topK, type ScoredItem } from "./similarity";
@@ -18,7 +13,6 @@ export {
   resetEmbeddingStoreForTests,
   type StoredEmbedding,
 } from "./store";
-
 
 let embeddingProvider: EmbeddingProvider | null = null;
 
@@ -51,10 +45,7 @@ export function resetEmbeddingProviderForTests(): void {
  * Embed `text` for `noteId` and cache locally (IndexedDB / localStorage).
  * Cache key is noteId + body hash so edits invalidate automatically.
  */
-export async function embedAndStore(
-  noteId: string,
-  text: string,
-): Promise<Float32Array> {
+export async function embedAndStore(noteId: string, text: string): Promise<Float32Array> {
   const provider = await ensureEmbeddingProvider();
   const bodyHash = hashBody(text);
   const cached = await getStoredEmbedding(noteId, bodyHash);
