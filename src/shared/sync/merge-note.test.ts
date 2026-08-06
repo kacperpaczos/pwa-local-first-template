@@ -69,6 +69,30 @@ describe("mergeNote — title (per-field LWW)", () => {
     const remote = note({ id: "1", title: "stale title", title_lamport: 1 });
     expect(mergeNote(local, remote).title).toBe("local title");
   });
+
+  it("converges to the same title on both peers on an exact tie (lamport AND updated_at)", () => {
+    // Regression test: an asymmetric "remote wins ties" rule makes device A
+    // (which sees B as "remote") and device B (which sees A as "remote")
+    // each pick their own side — permanent divergence. The tie-break must
+    // be a pure function of the two values, independent of which side is
+    // locally called "local" vs "remote".
+    const deviceA = note({
+      id: "1",
+      title: "alpha",
+      title_lamport: 3,
+      updated_at: "2026-01-01T00:00:00.000Z",
+    });
+    const deviceB = note({
+      id: "1",
+      title: "bravo",
+      title_lamport: 3,
+      updated_at: "2026-01-01T00:00:00.000Z",
+    });
+
+    const resolvedOnA = mergeNote(deviceA, deviceB).title;
+    const resolvedOnB = mergeNote(deviceB, deviceA).title;
+    expect(resolvedOnA).toBe(resolvedOnB);
+  });
 });
 
 describe("mergeNote — deleted_at (per-field LWW)", () => {

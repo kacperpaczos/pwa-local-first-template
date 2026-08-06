@@ -28,3 +28,6 @@ jobs:
 
       - name: Typecheck + unit + e2e
         run: pnpm typecheck && pnpm test:all
+
+      - name: Production build must not ship e2e-only identity hooks
+        run: pnpm build && pnpm check:no-e2e-hooks

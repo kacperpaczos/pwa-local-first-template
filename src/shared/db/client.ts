@@ -1,4 +1,4 @@
-import { createCollection } from "@tanstack/db";
+import { createCollection, type OperationType } from "@tanstack/db";
 import {
   BrowserCollectionCoordinator,
   createBrowserWASQLitePersistence,
@@ -38,10 +38,29 @@ export type AppDatabase = {
   close: () => Promise<void>;
 };
 
-function mutationsFromTransaction(
+/**
+ * Exhaustive over `@tanstack/db`'s `OperationType` — a new member added to
+ * that union in a future version fails typecheck here instead of silently
+ * falling through to "upsert".
+ */
+export function opForMutationType(type: OperationType): SyncMutation["op"] {
+  switch (type) {
+    case "delete":
+      return "soft_delete";
+    case "insert":
+    case "update":
+      return "upsert";
+    default: {
+      const unhandled: never = type;
+      throw new Error(`Unhandled mutation type: ${String(unhandled)}`);
+    }
+  }
+}
+
+export function mutationsFromTransaction(
   idempotencyKey: string,
   mutations: ReadonlyArray<{
-    type: string;
+    type: OperationType;
     modified?: unknown;
     original?: unknown;
   }>,
@@ -55,7 +74,7 @@ function mutationsFromTransaction(
     return {
       idempotencyKey: `${idempotencyKey}:${index}`,
       entity: "notes" as const,
-      op: mutation.type === "delete" ? ("soft_delete" as const) : ("upsert" as const),
+      op: opForMutationType(mutation.type),
       payload,
     };
   });
@@ -185,9 +204,4 @@ export async function openAppDatabase(): Promise<AppDatabase> {
   };
 
   return dbHandle;
-}
-
-/** Close and recreate Gun transport after identity / space-key import. */
-export async function reinitSyncTransport(db: AppDatabase): Promise<void> {
-  await db.reinitSyncTransport();
 }

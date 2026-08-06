@@ -1,4 +1,5 @@
 import SEA from "gun/sea";
+import { parseJsonOrThrow } from "@/shared/lib/json";
 import {
   IDENTITY_STORAGE_KEY,
   type IdentityPayload,
@@ -30,13 +31,7 @@ export function parseIdentityPayload(raw: unknown): IdentityPayload {
 }
 
 export function parseIdentityJson(text: string): IdentityPayload {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text) as unknown;
-  } catch {
-    throw new Error("Identity JSON is not valid");
-  }
-  return parseIdentityPayload(parsed);
+  return parseIdentityPayload(parseJsonOrThrow(text, "Identity JSON is not valid"));
 }
 
 export function loadStoredPair(

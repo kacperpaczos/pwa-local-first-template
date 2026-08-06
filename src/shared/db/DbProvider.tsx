@@ -5,8 +5,8 @@ import { openAppDatabase, type AppDatabase } from "./client";
 import { createPersistenceFacade, type PersistenceFacade } from "./facade";
 import { setSyncStatus } from "@/shared/sync/status";
 import { gcTombstones } from "@/shared/sync/gc";
-import { parseSyncCursorSeq } from "@/shared/sync/checkpoint";
-import { readSyncCursor } from "@/shared/sync/apply-remote";
+import { buildCheckpoint } from "@/shared/sync/checkpoint";
+import { seedLamportFromNotes } from "./lamport";
 import { checkDatabaseIntegrity } from "@/backup/integrity";
 import { dbIntegrityStore } from "@/backup/status";
 import { exposeIdentityE2eHooks } from "@/shared/identity";
@@ -44,8 +44,17 @@ export const DbProvider: ParentComponent = (props) => {
     await db.notes.preload();
     await db.syncMeta.preload();
 
-    // Fire-and-forget tombstone GC after a successful preload.
-    const coveredSeq = parseSyncCursorSeq(readSyncCursor(db.syncMeta));
+    // Seed the in-memory Lamport clock from whatever this device already
+    // has on disk, before anything (GC gating, the first pullRemote) reads
+    // or hands out a new value — otherwise a fresh page load starts the
+    // clock at 0 and could reissue a value this device already used in an
+    // earlier session.
+    seedLamportFromNotes(db.notes.toArray);
+
+    // Fire-and-forget tombstone GC after a successful preload. coveredSeq
+    // comes from local note Lamport clocks (buildCheckpoint), not the
+    // transport's sync cursor — the two live in unrelated numbering spaces.
+    const coveredSeq = buildCheckpoint(db.notes).seqCovered;
     void gcTombstones(
       db.notes,
       coveredSeq > 0 ? { coveredSeq } : {},

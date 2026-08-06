@@ -122,6 +122,7 @@ describe("GunSyncTransport", () => {
     const transport = new GunSyncTransport({
       peers: ["http://fake/gun"],
       pair,
+      origin: "device-a",
       createGun: () => fake as never,
     });
 
@@ -139,13 +140,76 @@ describe("GunSyncTransport", () => {
     const pull = await transport.pull(null);
     expect(pull.mutations).toHaveLength(1);
     expect(pull.mutations[0]?.idempotencyKey).toBe("k1");
-    expect(pull.cursor).toBe("1");
+    expect(JSON.parse(pull.cursor ?? "{}")).toEqual({ "device-a": 1 });
 
     const pullAgain = await transport.pull(pull.cursor);
     expect(pullAgain.mutations).toHaveLength(0);
-    expect(pullAgain.cursor).toBe("1");
+    expect(pullAgain.cursor).toBe(pull.cursor);
 
     await transport.close();
+  });
+
+  it("does not drop mutations when two origins independently number their own seq from 1", async () => {
+    // Regression test: the pull cursor used to be a single global numeric
+    // watermark, so two devices offline-writing independently (both
+    // starting their local seq counter at 1) could collide — whichever
+    // origin's mutation the puller saw last would push the cursor past the
+    // other origin's colliding seq, permanently hiding it from future
+    // pulls even though it was sitting right there in the buffer.
+    // Paired devices share the same SEA pair (see GunSyncTransport's
+    // bootstrap comment) — only `origin` differs between them.
+    const sharedPair = await generatePair();
+    const fake = createFakeGun();
+
+    const writerA = new GunSyncTransport({
+      peers: ["http://fake/gun"],
+      pair: sharedPair,
+      origin: "device-a",
+      createGun: () => fake as never,
+    });
+
+    // device-a pushes two mutations while device-b hasn't shown up yet —
+    // both origins independently number their own pushes starting at seq=1.
+    await writerA.push([
+      { idempotencyKey: "a1", entity: "notes", op: "upsert", payload: { ...sampleNote, id: "a1" } },
+      { idempotencyKey: "a2", entity: "notes", op: "upsert", payload: { ...sampleNote, id: "a2" } },
+    ]);
+
+    const reader = new GunSyncTransport({
+      peers: ["http://fake/gun"],
+      pair: sharedPair,
+      origin: "device-c",
+      createGun: () => fake as never,
+    });
+
+    const first = await reader.pull(null);
+    expect(first.mutations.map((m) => m.idempotencyKey).sort()).toEqual(["a1", "a2"]);
+    // Cursor only advances device-a's watermark — under the old single
+    // global-number cursor this would have been the bare string "2".
+    expect(JSON.parse(first.cursor ?? "{}")).toEqual({ "device-a": 2 });
+
+    // device-b now comes online and pushes its own seq=1, seq=2 — colliding
+    // numerically with device-a's already-consumed seq=1, seq=2.
+    const writerB = new GunSyncTransport({
+      peers: ["http://fake/gun"],
+      pair: sharedPair,
+      origin: "device-b",
+      createGun: () => fake as never,
+    });
+    await writerB.push([
+      { idempotencyKey: "b1", entity: "notes", op: "upsert", payload: { ...sampleNote, id: "b1" } },
+      { idempotencyKey: "b2", entity: "notes", op: "upsert", payload: { ...sampleNote, id: "b2" } },
+    ]);
+
+    // Bug reproduction: with a single global numeric cursor of "2", these
+    // would be filtered out forever (seq 1 and 2 are not > 2). The
+    // per-origin cursor must still surface them.
+    const second = await reader.pull(first.cursor);
+    expect(second.mutations.map((m) => m.idempotencyKey).sort()).toEqual(["b1", "b2"]);
+
+    await writerA.close();
+    await writerB.close();
+    await reader.close();
   });
 
   it("puts PROTOCOL_VERSION on the wire and never plaintext note content", async () => {
@@ -154,6 +218,7 @@ describe("GunSyncTransport", () => {
     const transport = new GunSyncTransport({
       peers: ["http://fake/gun"],
       pair,
+      origin: "device-a",
       createGun: () => fake as never,
     });
 
@@ -170,6 +235,7 @@ describe("GunSyncTransport", () => {
     expect(rows).toHaveLength(1);
     const row = rows[0]!;
     expect(row.v).toBe(PROTOCOL_VERSION);
+    expect(row.origin).toBe("device-a");
     expect(row).not.toHaveProperty("payloadJson");
     expect(typeof row.ciphertext).toBe("string");
     const serialized = JSON.stringify(row);
@@ -185,6 +251,7 @@ describe("GunSyncTransport", () => {
     const transport = new GunSyncTransport({
       peers: ["http://fake/gun"],
       pair,
+      origin: "device-a",
       createGun: () => fake as never,
     });
 
@@ -206,6 +273,7 @@ describe("GunSyncTransport", () => {
         op: "upsert",
         ciphertext,
         seq: 42,
+        origin: "device-b",
       });
 
     // Allow any async follow-up; unsupported v should short-circuit before decrypt.
@@ -226,6 +294,7 @@ describe("GunSyncTransport", () => {
     const writer = new GunSyncTransport({
       peers: ["http://fake/gun"],
       pair: writerPair,
+      origin: "device-a",
       createGun: () => fake as never,
     });
     await writer.push([
@@ -241,6 +310,7 @@ describe("GunSyncTransport", () => {
     const reader = new GunSyncTransport({
       peers: ["http://fake/gun"],
       pair: readerPair,
+      origin: "device-b",
       createGun: () => fake as never,
     });
     const pull = await reader.pull(null);
@@ -254,6 +324,7 @@ describe("GunSyncTransport", () => {
     const transport = new GunSyncTransport({
       peers: ["http://fake/gun"],
       pair,
+      origin: "device-a",
       createGun: () => fake as never,
     });
 
@@ -282,6 +353,7 @@ describe("GunSyncTransport", () => {
       pair,
       spaceKey,
       spaceId,
+      origin: "device-a",
       createGun: () => fake as never,
     });
     await writer.push([
@@ -313,11 +385,13 @@ describe("GunSyncTransport", () => {
         op: "upsert",
         ciphertext: legacyCt,
         seq: 99,
+        origin: "device-b",
       });
 
     const reader = new GunSyncTransport({
       peers: ["http://fake/gun"],
       pair,
+      origin: "device-c",
       spaceKey,
       spaceId,
       createGun: () => fake as never,

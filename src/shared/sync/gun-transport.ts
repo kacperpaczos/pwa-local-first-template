@@ -2,7 +2,7 @@ import Gun from "gun/gun";
 import "gun/lib/webrtc";
 import SEA from "gun/sea";
 import type { IGunInstance, IGunUserInstance } from "gun";
-import { ensurePair, ensureSpace, type SeaPair } from "@/shared/identity";
+import { ensureOriginId, ensurePair, ensureSpace, type SeaPair } from "@/shared/identity";
 import { open, seal, type SealedBlob } from "@/shared/crypto/envelope";
 import {
   isSupportedProtocolVersion,
@@ -22,17 +22,49 @@ import type {
 
 export type GunWireMutation = ValidatedSyncMutation & {
   seq: number;
+  origin: string;
 };
 
 type BufferedEntry = {
   seq: number;
+  origin: string;
   mutation: SyncMutation;
 };
+
+/** Pull cursor: per-origin high-water mark (a small vector clock), so that
+ * two devices independently numbering their own `seq` from 1 can never
+ * shadow each other's mutations — see docs/adr for the collision this
+ * replaced (a single global numeric watermark silently dropped mutations
+ * from whichever origin's counter lagged behind another's). */
+type CursorMap = Record<string, number>;
+
+function parseCursorMap(cursor: string | null): CursorMap {
+  if (!cursor) return {};
+  try {
+    const parsed = JSON.parse(cursor) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const out: CursorMap = {};
+    for (const [origin, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof value === "number" && Number.isFinite(value)) {
+        out[origin] = value;
+      }
+    }
+    return out;
+  } catch {
+    // Legacy (pre-v2) cursor was a plain numeric string, or the value is
+    // otherwise unparsable — start from an empty map. Safe: mutations are
+    // idempotent, so a one-time full re-pull just redoes already-applied
+    // no-op merges instead of silently dropping anything.
+    return {};
+  }
+}
 
 export type GunSyncTransportOptions = {
   peers: string[];
   /** Injected pair (tests). Default: ensurePair() from localStorage. */
   pair?: SeaPair;
+  /** Injected per-device origin id (tests). Default: ensureOriginId() from localStorage. */
+  origin?: string;
   /**
    * Injected space key (tests). Default: ensureSpace() from localStorage.
    * When present, mutation payloads are AES-GCM sealed with this key.
@@ -140,6 +172,7 @@ export class GunSyncTransport implements SyncTransport {
    * same pair, so pair.epriv doubles as the symmetric content-encryption key
    * for legacy SEA.encrypt/decrypt rows. */
   private pair!: SeaPair;
+  private origin!: string;
   private spaceKey: CryptoKey | null = null;
   private spaceId: string | null = null;
 
@@ -156,6 +189,7 @@ export class GunSyncTransport implements SyncTransport {
   private async bootstrap(): Promise<void> {
     const pair = this.options.pair ?? (await ensurePair());
     this.pair = pair;
+    this.origin = this.options.origin ?? ensureOriginId();
 
     if (this.options.spaceKey && this.options.spaceId) {
       this.spaceKey = this.options.spaceKey;
@@ -207,7 +241,11 @@ export class GunSyncTransport implements SyncTransport {
           return;
         }
 
-        void this.decryptRow(row, seq, v);
+        if (typeof row.origin !== "string" || row.origin.length === 0) {
+          return;
+        }
+
+        void this.decryptRow(row, seq, row.origin, v);
       });
   }
 
@@ -232,6 +270,7 @@ export class GunSyncTransport implements SyncTransport {
   private async decryptRow(
     row: Record<string, unknown>,
     seq: number,
+    origin: string,
     v: number,
   ): Promise<void> {
     if (this.closed || typeof row.ciphertext !== "string") return;
@@ -254,14 +293,14 @@ export class GunSyncTransport implements SyncTransport {
       return;
     }
 
+    // Same idempotencyKey is always pushed by the same origin (one writer
+    // per mutation) — a lower/equal seq here just means Gun re-delivered
+    // the same row, not a new mutation.
     const existing = this.buffer.get(mutation.idempotencyKey);
     if (existing && existing.seq >= seq) {
       return;
     }
-    this.buffer.set(mutation.idempotencyKey, { seq, mutation });
-    if (seq >= this.nextSeq) {
-      this.nextSeq = seq + 1;
-    }
+    this.buffer.set(mutation.idempotencyKey, { seq, origin, mutation });
   }
 
   private async encryptPayload(payload: unknown): Promise<string | null> {
@@ -321,12 +360,14 @@ export class GunSyncTransport implements SyncTransport {
         op: validated.op,
         ciphertext,
         seq,
+        origin: this.origin,
       };
 
       try {
         await gunPut(this.notesRoot().get(validated.idempotencyKey), wire);
         this.buffer.set(validated.idempotencyKey, {
           seq,
+          origin: this.origin,
           mutation: validated,
         });
         accepted.push(validated.idempotencyKey);
@@ -346,18 +387,24 @@ export class GunSyncTransport implements SyncTransport {
     // Give the mesh a brief moment to deliver pending graph updates.
     await new Promise((resolve) => setTimeout(resolve, 200));
 
-    const after = cursor ? Number(cursor) : 0;
-    const cursorNum = Number.isFinite(after) ? after : 0;
+    const cursorMap = parseCursorMap(cursor);
 
     const entries = [...this.buffer.values()]
-      .filter((entry) => entry.seq > cursorNum)
-      .sort((a, b) => a.seq - b.seq);
+      .filter((entry) => entry.seq > (cursorMap[entry.origin] ?? 0))
+      .sort((a, b) => (a.origin === b.origin ? a.seq - b.seq : a.origin < b.origin ? -1 : 1));
 
     const mutations = entries.map((e) => e.mutation);
-    const nextCursor =
-      entries.length > 0 ? String(entries[entries.length - 1]!.seq) : cursor;
 
-    return { cursor: nextCursor, mutations };
+    if (entries.length === 0) {
+      return { cursor, mutations };
+    }
+
+    const nextCursorMap: CursorMap = { ...cursorMap };
+    for (const entry of entries) {
+      nextCursorMap[entry.origin] = Math.max(nextCursorMap[entry.origin] ?? 0, entry.seq);
+    }
+
+    return { cursor: JSON.stringify(nextCursorMap), mutations };
   }
 
   async resolve(_conflicts: readonly Conflict[]): Promise<void> {

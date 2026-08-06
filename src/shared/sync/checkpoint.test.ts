@@ -8,7 +8,6 @@ import {
   buildCheckpoint,
   listLocalCheckpoints,
   openCheckpoint,
-  parseSyncCursorSeq,
   publishCheckpointToGun,
   sealCheckpoint,
   storeCheckpointLocal,
@@ -52,16 +51,8 @@ describe("buildCheckpoint", () => {
     expect(cp.notes).toHaveLength(2);
   });
 
-  it("takes max of cursor seq and note lamports", () => {
-    const cp = buildCheckpoint([note({ id: "a", title_lamport: 4 })], {
-      cursor: "12",
-    });
-    expect(cp.seqCovered).toBe(12);
-  });
-
-  it("ignores non-numeric cursors", () => {
-    expect(parseSyncCursorSeq("gun:wat")).toBe(0);
-    expect(parseSyncCursorSeq(null)).toBe(0);
+  it("is 0 for an empty note set", () => {
+    expect(buildCheckpoint([]).seqCovered).toBe(0);
   });
 });
 

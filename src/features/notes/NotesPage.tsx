@@ -35,7 +35,6 @@ import {
   notesFormErrorStore,
   setNotesFilter,
   setNotesFormError,
-  syncStatusStore,
 } from "./notes.store";
 
 const SUMMARY_SEPARATOR = "\n\n---\nSummary:\n";
@@ -52,7 +51,6 @@ const NotesPage: Component = () => {
   const { db, facade } = useDb();
   const filter = useStore(notesFilterStore);
   const formError = useStore(notesFormErrorStore);
-  const syncStatus = useStore(syncStatusStore);
   const aiStatus = useStore(aiStatusStore);
 
   const notesQuery = useLiveQuery((q) =>
@@ -186,27 +184,22 @@ const NotesPage: Component = () => {
     <div class="space-y-4 md:space-y-6">
       <PageHeader
         title="Notes"
-        description={`Sync: ${syncStatus()} · filter: ${filter()}`}
+        description={`filter: ${filter()}`}
         data-testid="sync-status"
         actions={
-          <>
-            <Button
-              variant="outline"
-              size="sm"
-              data-testid="sync-now"
-              onClick={() => {
-                void db.pullRemote().catch((error) => {
-                  setNotesFormError(friendlyNoteError(error));
-                });
-              }}
-            >
-              <RefreshCw class="size-4" />
-              Sync now
-            </Button>
-            <Badge variant="secondary" class="capitalize">
-              {syncStatus()}
-            </Badge>
-          </>
+          <Button
+            variant="outline"
+            size="sm"
+            data-testid="sync-now"
+            onClick={() => {
+              void db.pullRemote().catch((error) => {
+                setNotesFormError(friendlyNoteError(error));
+              });
+            }}
+          >
+            <RefreshCw class="size-4" />
+            Sync now
+          </Button>
         }
       />
 

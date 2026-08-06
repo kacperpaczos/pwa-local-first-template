@@ -4,14 +4,20 @@ import { getEntitySchema, registerEntitySchema } from "./entity-registry";
 
 registerEntitySchema("notes", noteSchema);
 
-/** Current mutation wire protocol version (Gun SEA graph). */
-export const PROTOCOL_VERSION = 1;
+/**
+ * Current mutation wire protocol version (Gun SEA graph).
+ * v2 adds a required `origin` field on the wire (per-device id used to
+ * disambiguate independent writers in the sync cursor — see
+ * GunSyncTransport). v1 peers can't produce it, so v1 rows are rejected by
+ * {@link isSupportedProtocolVersion} and surface as "outdated" sync status.
+ */
+export const PROTOCOL_VERSION = 2;
 
 /** Inclusive lower bound of versions this client can ingest. */
-export const SUPPORTED_MIN_V = 1;
+export const SUPPORTED_MIN_V = 2;
 
 /** Inclusive upper bound of versions this client can ingest. */
-export const SUPPORTED_MAX_V = 1;
+export const SUPPORTED_MAX_V = 2;
 
 export function isSupportedProtocolVersion(v: number): boolean {
   return Number.isInteger(v) && v >= SUPPORTED_MIN_V && v <= SUPPORTED_MAX_V;

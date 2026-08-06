@@ -18,7 +18,8 @@
     "test:e2e": "playwright test",
     "test:e2e:sync": "playwright test --project=chromium-sync",
     "test:e2e:install": "playwright install chromium",
-    "test:all": "pnpm test:unit && pnpm test:e2e"
+    "test:all": "pnpm test:unit && pnpm test:e2e",
+    "check:no-e2e-hooks": "node scripts/check-no-e2e-hooks.mjs"
   },
   "license": "MIT",
   "dependencies": {
