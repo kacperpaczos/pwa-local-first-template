@@ -45,20 +45,23 @@ describe("mergeNote — title (per-field LWW)", () => {
     expect(mergeNote(local, remote).title).toBe("remote");
   });
 
-  it("uses updated_at as a tiebreaker when title_lamport ties", () => {
+  it("ignores wall-clock updated_at on a lamport tie — value order decides", () => {
+    // A later updated_at must NOT win: device clocks are unsynchronized, so
+    // the outcome would depend on clock skew. The stable value comparison
+    // picks "zulu" > "alpha" regardless of which side has the later clock.
     const local = note({
       id: "1",
-      title: "local",
+      title: "zulu",
       title_lamport: 2,
       updated_at: "2026-01-01T00:00:00.000Z",
     });
     const remote = note({
       id: "1",
-      title: "remote",
+      title: "alpha",
       title_lamport: 2,
       updated_at: "2026-01-02T00:00:00.000Z",
     });
-    expect(mergeNote(local, remote).title).toBe("remote");
+    expect(mergeNote(local, remote).title).toBe("zulu");
   });
 
   it("does not let a body-only remote edit clobber a concurrent local title edit", () => {
