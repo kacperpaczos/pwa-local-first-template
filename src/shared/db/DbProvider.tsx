@@ -16,7 +16,7 @@ type DbContextValue = {
   facade: PersistenceFacade;
 };
 
-const DbContext = createContext<DbContextValue>();
+export const DbContext = createContext<DbContextValue>();
 
 export class DbCorruptError extends Error {
   constructor(public readonly db: AppDatabase) {

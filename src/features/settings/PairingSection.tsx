@@ -7,7 +7,6 @@ import {
   buildPairingPayload,
   commitPairingPayload,
   exportPairingJson,
-  importIdentityJson,
   pairingToQrDataUrl,
   previewPairingPayload,
   type PairingPayload,
@@ -69,31 +68,23 @@ const PairingSection: Component = () => {
    * See commitPairingPayload's doc comment for why this gate exists: the
    * payload's own sasDigits is self-derived and cannot detect a fully
    * forged payload on its own.
+   *
+   * A payload that fails to parse (wrong/old version, corrupt JSON, missing
+   * fields) is a hard stop — the error is shown as-is. There is no fallback
+   * to a weaker, unconfirmed import path here: a previous version of this
+   * screen silently accepted legacy v1 identity JSON with no SAS check at
+   * all whenever v2 parsing failed, which routed any malformed-on-purpose
+   * payload straight around the SAS gate.
    */
   const onPreviewImportPairing = createAsyncAction(setBusy, setStatus, async () => {
-    try {
-      const text = importText().trim();
-      const payload = await previewPairingPayload(text);
-      setImportPreview(payload);
-      setImportSasDigits(payload.sasDigits);
-      setConfirmSasInput("");
-      setStatus(
-        "Code parsed. Compare the SAS below with the other device, then enter it to confirm the import.",
-      );
-    } catch (pairingError) {
-      // Backward compatible: accept legacy v1 identity JSON (SEA only, no
-      // space key / SAS — nothing to confirm, so this commits immediately).
-      try {
-        const pair = importIdentityJson(importText().trim());
-        setPubPreview(pair.pub);
-        setImportText("");
-        await db.reinitSyncTransport();
-        toast.success("Identity imported — sync transport restarted");
-        setStatus("Identity imported. Sync transport reinitialized with the new keys.");
-      } catch {
-        setStatus(pairingError instanceof Error ? pairingError.message : String(pairingError));
-      }
-    }
+    const text = importText().trim();
+    const payload = await previewPairingPayload(text);
+    setImportPreview(payload);
+    setImportSasDigits(payload.sasDigits);
+    setConfirmSasInput("");
+    setStatus(
+      "Code parsed. Compare the SAS below with the other device, then enter it to confirm the import.",
+    );
   });
 
   const onCancelImportPreview = () => {
@@ -201,7 +192,7 @@ const PairingSection: Component = () => {
             value={importText()}
             disabled={importPreview() != null}
             onInput={(e) => setImportText(e.currentTarget.value)}
-            placeholder='{"v":2,"pair":{...},"spaceId":"...","spaceKey":"...","sasDigits":"123456"}'
+            placeholder='{"v":3,"pair":{...},"spaceId":"...","spaceKey":"...","sasDigits":"123456","inviterDevice":{"id":"..."}}'
           />
         </TextField>
         <Show

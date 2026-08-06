@@ -36,18 +36,35 @@ function memoryStorage(initial: Record<string, string> = {}): Storage {
 }
 
 describe("pairing", () => {
-  it("builds a v2 payload with matching SAS digits", async () => {
+  it("builds a v3 payload with matching SAS digits and an inviter device id", async () => {
     const storage = memoryStorage();
     const payload = await buildPairingPayload(storage);
-    expect(payload.v).toBe(2);
+    expect(payload.v).toBe(3);
     expect(payload.pair.pub).toBeTruthy();
     expect(payload.spaceId).toBeTruthy();
     expect(payload.spaceKey.length).toBeGreaterThan(0);
     expect(payload.sasDigits).toMatch(/^\d{6}$/);
+    expect(payload.inviterDevice.id).toBeTruthy();
 
     const again = await deriveSasDigits(payload.spaceId, [payload.pair.pub]);
     expect(again).toBe(payload.sasDigits);
     expect(verifySas(payload.sasDigits, again)).toBe(true);
+  });
+
+  it("loudly rejects a v2 (or earlier) payload instead of silently downgrading", async () => {
+    const storage = memoryStorage();
+    const payload = await buildPairingPayload(storage);
+    const { inviterDevice, ...v2Shaped } = payload;
+    void inviterDevice;
+    const legacy = { ...v2Shaped, v: 2 };
+    expect(() => parsePairingJson(JSON.stringify(legacy))).toThrow(/older app version/);
+  });
+
+  it("rejects a payload missing the inviter device id", async () => {
+    const payload = await buildPairingPayload(memoryStorage());
+    const { inviterDevice, ...rest } = payload;
+    void inviterDevice;
+    expect(() => parsePairingJson(JSON.stringify(rest))).toThrow(/inviter device/);
   });
 
   it("verifySas requires exact 6-digit match", () => {

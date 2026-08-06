@@ -1,16 +1,33 @@
 import { exportSpaceKey, importSpaceKey } from "@/shared/crypto/envelope";
 import { parseJsonOrThrow } from "@/shared/lib/json";
+import { ensureDeviceKey } from "./device";
 import { ensurePair, savePair } from "./pair";
 import { ensureSpace, saveSpaceExported } from "./space";
 import type { SeaPair } from "./types";
 
+export type InviterDevice = {
+  /** The inviting device's op-log id (base64url ed25519 public key). Informational only. */
+  id: string;
+};
+
+/**
+ * v3 (op-log era): adds `inviterDevice`, purely informational — it tells the
+ * importing UI which device's log to expect entries from first. Device
+ * SIGNING keys are never part of this payload and never transferred: every
+ * device mints and keeps its own (see shared/identity/device.ts). What IS
+ * still shared here (same as v2) is the SEA pair (Gun write-ACL) and the
+ * raw space key (content encryption) — every paired device holds identical
+ * copies of both. See README "Known caveats" for what that does and doesn't
+ * buy you.
+ */
 export type PairingPayload = {
-  v: 2;
+  v: 3;
   pair: SeaPair;
   spaceId: string;
   /** Raw AES-256 space key (base64). Treated as secret — QR is the seal. */
   spaceKey: string;
   sasDigits: string;
+  inviterDevice: InviterDevice;
 };
 
 export async function deriveSasDigits(spaceId: string, pubs: readonly string[]): Promise<string> {
@@ -35,12 +52,14 @@ export async function buildPairingPayload(
   const { spaceId, key } = await ensureSpace(storage);
   const spaceKey = await exportSpaceKey(key);
   const sasDigits = await deriveSasDigits(spaceId, [pair.pub]);
+  const device = ensureDeviceKey(storage);
   return {
-    v: 2,
+    v: 3,
     pair,
     spaceId,
     spaceKey,
     sasDigits,
+    inviterDevice: { id: device.deviceId },
   };
 }
 
@@ -53,8 +72,12 @@ export function parsePairingPayload(raw: unknown): PairingPayload {
     throw new Error("Invalid pairing payload");
   }
   const obj = raw as Record<string, unknown>;
-  if (obj.v !== 2) {
-    throw new Error("Unsupported pairing payload version");
+  if (obj.v !== 3) {
+    throw new Error(
+      obj.v === 1 || obj.v === 2
+        ? `Pairing code is from an older app version (v${String(obj.v)}) — ask the other device to generate a new one`
+        : "Unsupported pairing payload version",
+    );
   }
   const pair = obj.pair as SeaPair | undefined;
   if (
@@ -72,12 +95,17 @@ export function parsePairingPayload(raw: unknown): PairingPayload {
   if (typeof obj.sasDigits !== "string" || !/^\d{6}$/.test(obj.sasDigits)) {
     throw new Error("Pairing payload missing SAS digits");
   }
+  const inviterDevice = obj.inviterDevice as InviterDevice | undefined;
+  if (!inviterDevice || typeof inviterDevice.id !== "string" || inviterDevice.id.length === 0) {
+    throw new Error("Pairing payload missing inviter device id");
+  }
   return {
-    v: 2,
+    v: 3,
     pair,
     spaceId: obj.spaceId,
     spaceKey: obj.spaceKey,
     sasDigits: obj.sasDigits,
+    inviterDevice: { id: inviterDevice.id },
   };
 }
 

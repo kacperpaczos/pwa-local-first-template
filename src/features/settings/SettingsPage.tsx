@@ -3,6 +3,7 @@ import PageHeader from "@/components/PageHeader";
 import AppearanceSection from "./AppearanceSection";
 import BackupSection from "./BackupSection";
 import ConflictHistorySection from "./ConflictHistorySection";
+import DevicesSection from "./DevicesSection";
 import PairingSection from "./PairingSection";
 import RecoverySection from "./RecoverySection";
 import StorageSection from "./StorageSection";
@@ -19,6 +20,7 @@ const SettingsPage: Component = () => {
       <BackupSection />
       <ConflictHistorySection />
       <PairingSection />
+      <DevicesSection />
       <RecoverySection />
       <StorageSection />
     </div>
