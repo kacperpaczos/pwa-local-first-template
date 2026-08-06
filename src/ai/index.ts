@@ -103,8 +103,8 @@ export {
 export { GOLDEN_SET, matchesNoCoverage, type GoldenCase } from "./eval/golden-set";
 
 /**
- * Runs the Etap 3.0 gate: feature flag, WebGPU, then a non-blocking storage
- * headroom probe. Call once at app start. Download + inference are started
+ * Runs the availability gate: feature flag, WebGPU, then a non-blocking
+ * storage headroom probe. Call once at app start. Download + inference are started
  * explicitly from the AI page. Cache probe runs in the background so UI can
  * show Load vs Download. Low headroom keeps AI available but warns via
  * `aiStorageHeadroomStore`.
