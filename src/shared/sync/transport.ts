@@ -24,6 +24,18 @@ export type FetchResult = {
   sawUnsupportedVersion: boolean;
 };
 
+/**
+ * Which ops actually reached the mesh. `publish` MUST report only ops it
+ * durably handed to the transport — a transport that silently accepts and
+ * drops (offline-only Noop, a closed instance mid-teardown) reports none,
+ * so the caller leaves them queued instead of flagging them published.
+ * Marking an unsent op published would strand it forever: the log's next
+ * head announcement would sit above a hole no peer can ever fetch.
+ */
+export type PublishResult = {
+  publishedHashes: readonly string[];
+};
+
 export type Unsubscribe = () => void;
 
 /**
@@ -34,8 +46,11 @@ export type Unsubscribe = () => void;
 export interface LogSyncTransport {
   /** Resolves when the transport is authenticated and subscribable. */
   ready(): Promise<void>;
-  /** Publish op rows, then bump this device's announced head (monotone). */
-  publish(entity: string, ops: readonly PublishableOp[]): Promise<void>;
+  /**
+   * Publish op rows, then bump this device's announced head (monotone).
+   * Returns the ops that actually went out — see {@link PublishResult}.
+   */
+  publish(entity: string, ops: readonly PublishableOp[]): Promise<PublishResult>;
   /** Publish `device`'s ack map (other deviceId → acked seq of that device's log). */
   publishAcks(entity: string, device: string, acks: Record<string, number>): Promise<void>;
   subscribeHeads(entity: string, cb: (head: HeadAnnouncement) => void): Unsubscribe;

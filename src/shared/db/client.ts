@@ -49,7 +49,9 @@ export type AppDatabase = {
   rawDb: {
     execute: <TRow = unknown>(sql: string, params?: readonly unknown[]) => Promise<readonly TRow[]>;
   };
-  /** Start subscriptions + first sync. Call AFTER collections are preloaded. */
+  /** Preload collections + hydrate the op-log index, without starting sync. */
+  prepareLocalOnly: () => Promise<void>;
+  /** Start subscriptions + genesis publish + first sync. */
   startSync: () => Promise<void>;
   pullRemote: () => Promise<void>;
   /** Rebuild the transport (post identity/pairing import). */
@@ -249,12 +251,29 @@ export async function openAppDatabase(): Promise<AppDatabase> {
     },
   });
 
-  const startSync = async () => {
-    // Populate the store's in-memory read index from whatever this device
-    // already has on disk. Must run before anything reads head/unpublished/
-    // unapplied state — the collections are preloaded by the caller
-    // (DbProvider) before startSync() runs.
+  /**
+   * Load every collection into memory and populate the op-log read index,
+   * WITHOUT starting sync. Idempotent.
+   *
+   * The corrupt-database path needs exactly this and nothing more: recovery
+   * still has to read notes (to export them) and append imported ones (which
+   * requires a hydrated head index, or `append` cannot find the op to chain
+   * onto and refuses to extend the log). Sync must stay off there — the DB
+   * failed its integrity check.
+   */
+  const prepareLocalOnly = async () => {
+    await offline.waitForInit();
+    await notes.preload();
+    await oplogOps.preload();
+    await oplogHeads.preload();
     store.hydrate([SYNC_ENTITY]);
+  };
+
+  const startSync = async () => {
+    // Read index must be populated before anything reads head/unpublished/
+    // unapplied state. Normally already done by the caller (DbProvider);
+    // repeated here so startSync is safe to call on its own.
+    await prepareLocalOnly();
 
     // v2→v3 upgrade / fresh-db genesis: local notes exist but this device's
     // log is empty and no other device's log is known — republish local
@@ -283,6 +302,7 @@ export async function openAppDatabase(): Promise<AppDatabase> {
     store,
     engine,
     rawDb: database,
+    prepareLocalOnly,
     startSync,
     pullRemote: () => engine.syncNow(),
     reinitSyncTransport: () => engine.restart(),

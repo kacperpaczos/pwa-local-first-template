@@ -137,16 +137,69 @@ export class OpLogStore {
     }
   }
 
+  /**
+   * Resolve this device's current log height and the hash to backlink to.
+   *
+   * Three sources can disagree, and the highest always wins because seq must
+   * never be reused:
+   * - the indexed head row (this instance's view),
+   * - the highest indexed op (survives a head row lost between the two
+   *     durable writes in a crashed `append` — otherwise the next append
+   *     would reuse that seq and fork this device's own log),
+   * - the cross-tab localStorage counter (a sibling tab appended after we
+   *     hydrated; our in-memory index is simply stale, and the row IS in the
+   *     shared database — so re-read from persistence rather than failing).
+   */
+  private resolveOwnHead(entity: string): { height: number; backlink: string | null } {
+    const own = this.device.deviceId;
+    const indexedHeight = () =>
+      Math.max(this.headIndexed(entity, own)?.seq ?? 0, this.maxOwnSeqIndexed(entity));
+
+    const counted = this.counter?.get(entity) ?? 0;
+    if (counted > indexedHeight()) {
+      this.refreshDeviceFromPersistence(entity, own);
+    }
+
+    const height = Math.max(indexedHeight(), counted);
+    if (height === 0) return { height: 0, backlink: null };
+
+    const backlink =
+      this.headIndexed(entity, own)?.seq === height
+        ? (this.headIndexed(entity, own)?.hash ?? null)
+        : (this.opAtIndexed(entity, own, height)?.hash ?? null);
+
+    if (backlink === null) {
+      throw new Error(
+        `Op log for "${entity}" is at height ${height} but op ${height} is missing — ` +
+          "the log cannot be extended without forking it",
+      );
+    }
+    return { height, backlink };
+  }
+
+  /** Pull one device's rows from durable storage into the read index. */
+  private refreshDeviceFromPersistence(entity: string, device: string): void {
+    for (const op of this.persistence.listOps({ entity, device })) {
+      this.opsByHash.set(op.hash, op);
+    }
+    const head = this.persistence.getHead(entity, device);
+    if (head) this.headsByKey.set(head.id, head);
+  }
+
+  private maxOwnSeqIndexed(entity: string): number {
+    let max = 0;
+    for (const op of this.opsByHash.values()) {
+      if (op.entity === entity && op.device === this.device.deviceId && op.seq > max) {
+        max = op.seq;
+      }
+    }
+    return max;
+  }
+
   /** Sign and durably append a payload to this device's log for `entity`. */
   append(entity: string, payload: unknown): Promise<Operation> {
     return this.lock(async () => {
-      const head = this.headIndexed(entity, this.device.deviceId);
-      const counted = this.counter?.get(entity) ?? 0;
-      const height = Math.max(head?.seq ?? 0, counted);
-      const backlink = height === 0 ? null : ((head?.seq === height ? head.hash : null) ?? null);
-      if (height > 0 && backlink === null) {
-        throw new Error(`Op log for "${entity}" is at height ${height} but the head op is missing`);
-      }
+      const { height, backlink } = this.resolveOwnHead(entity);
 
       const payloadBytes = encodeOpPayload(payload);
       const op = createOperation({
@@ -259,6 +312,21 @@ export class OpLogStore {
     for (const hash of hashes) {
       await this.persistence.patchOp(hash, { published: true });
       this.patchIndexed(hash, { published: true });
+    }
+  }
+
+  /**
+   * Re-queue this device's whole log for publication. Called when the space
+   * or identity changed (pairing, recovery): "published" was true of a graph
+   * this device can no longer reach, so without this the pre-change history
+   * would never arrive in the new space and the first post-change op would
+   * announce a head above a hole no peer could fetch past. Republishing is
+   * idempotent — peers dedupe by hash and seq.
+   */
+  async resetOwnPublished(entity: string): Promise<void> {
+    for (const op of this.query({ entity, device: this.device.deviceId, published: true })) {
+      await this.persistence.patchOp(op.hash, { published: false });
+      this.patchIndexed(op.hash, { published: false });
     }
   }
 

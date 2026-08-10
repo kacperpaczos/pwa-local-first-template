@@ -36,13 +36,16 @@ export const DbProvider: ParentComponent = (props) => {
     const intact = await checkDatabaseIntegrity(db.rawDb);
     dbIntegrityStore.set(intact ? "ok" : "corrupt");
     if (!intact) {
+      // RecoveryScreen still has to read notes (to export them) and append
+      // imported ones, both of which need loaded collections and a hydrated
+      // op-log index. Best-effort: the database just failed its integrity
+      // check, so loading may itself fail — recovery then degrades to
+      // whatever it can read rather than erroring out of the screen.
+      await db.prepareLocalOnly().catch(() => undefined);
       throw new DbCorruptError(db);
     }
 
-    await db.offline.waitForInit();
-    await db.notes.preload();
-    await db.oplogOps.preload();
-    await db.oplogHeads.preload();
+    await db.prepareLocalOnly();
 
     // Seed the in-memory Lamport clock from whatever this device already
     // has on disk, before anything (GC gating, the first sync) reads or
@@ -53,19 +56,26 @@ export const DbProvider: ParentComponent = (props) => {
 
     // Subscriptions + genesis publish + first sync — needs preloaded
     // collections, which is why the engine doesn't start inside
-    // openAppDatabase.
-    void db.startSync().catch(() => {
-      /* engine recomputes status itself */
-    });
-
-    // Fire-and-forget tombstone GC. A tombstone is only hard-deleted when
-    // every device in the roster has acked the op that recorded it — the
-    // retention window remains the backstop for devices that never return.
-    void gcTombstones(db.notes, {
-      isCovered: makeTombstoneCoverage(() => db.oplogOps.toArray, db.engine),
-    }).catch(() => {
-      /* GC is best-effort */
-    });
+    // openAppDatabase. Tombstone GC is chained AFTER it rather than fired
+    // alongside: a tombstone is only hard-deleted once every device in the
+    // roster has acked the op that recorded it, and acks are session state
+    // that only arrives once the transport is up. Running GC before then
+    // would evaluate the gate against an empty ack table on every boot.
+    // (The gate is conservative either way — an unacked peer blocks the
+    // delete — so the worst case here is a skipped pass, not a lost note.)
+    void db
+      .startSync()
+      .catch(() => {
+        /* engine recomputes status itself */
+      })
+      .then(() =>
+        gcTombstones(db.notes, {
+          isCovered: makeTombstoneCoverage(() => db.oplogOps.toArray, db.engine),
+        }),
+      )
+      .catch(() => {
+        /* GC is best-effort */
+      });
     const facade = createPersistenceFacade(db);
     // Expose for DEV tooling and Playwright e2e (VITE_E2E=1 in the e2e build).
     if (import.meta.env.DEV || import.meta.env.VITE_E2E === "1") {

@@ -1,5 +1,5 @@
 import * as z from "zod/mini";
-import { noteSchema } from "@/shared/db/schemas";
+import { MAX_LAMPORT, noteSchema } from "@/shared/db/schemas";
 
 /**
  * Op payloads carried by the per-device logs. Unlike the retired wire
@@ -17,7 +17,8 @@ export const noteOpPayloadSchema = z.discriminatedUnion("kind", [
     kind: z.literal("delete"),
     id: z.string(),
     deleted_at: z.string(),
-    deleted_lamport: z.number(),
+    // Bounded like the note schema's counters — see MAX_LAMPORT.
+    deleted_lamport: z.number().check(z.int(), z.gte(0), z.lte(MAX_LAMPORT)),
   }),
 ]);
 

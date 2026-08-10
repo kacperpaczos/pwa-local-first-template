@@ -52,6 +52,8 @@ export class SyncEngine {
   private interval: ReturnType<typeof setInterval> | null = null;
   private readonly reactive: boolean;
   private closed = false;
+  /** Set while restart() swaps the transport, so no cycle races the swap. */
+  private paused = false;
   private locked = false;
   private sawUnsupported = false;
   private running: Promise<void> | null = null;
@@ -97,9 +99,21 @@ export class SyncEngine {
     );
   }
 
-  /** Devices known to this space: seen heads ∪ seen acks ∪ self. */
+  /**
+   * Devices known to this space: every device with a PERSISTED log head
+   * (i.e. one we have ever synced from) ∪ heads/acks seen this session ∪ self.
+   *
+   * The persisted part is what makes this safe at boot. `remoteHeads` and
+   * `acksByDevice` are in-memory and start empty, and they only fill after
+   * the transport authenticates and Gun delivers — strictly later than the
+   * fire-and-forget GC pass on startup. A roster built from those alone
+   * would be `[self]` at exactly the moment GC runs, making the coverage
+   * gate below vacuously true for every op this device authored — the same
+   * no-op gate the op-log rewrite set out to replace.
+   */
   roster(): string[] {
     const set = new Set<string>([this.store.deviceId]);
+    for (const head of this.store.heads(this.entity)) set.add(head.device);
     for (const device of this.remoteHeads.keys()) set.add(device);
     for (const device of this.acksByDevice.keys()) set.add(device);
     return [...set];
@@ -108,6 +122,12 @@ export class SyncEngine {
   /**
    * Coverage gate for tombstone GC: the op at (device, seq) is covered when
    * every OTHER device in the roster has acked that device's log to ≥ seq.
+   *
+   * Acks are session state, so a known peer whose ack hasn't arrived yet
+   * counts as NOT covering — conservative by design: a delayed GC pass costs
+   * nothing, while a premature one resurrects notes when the unacked peer
+   * eventually syncs its pre-delete copy. A device with no known peers is
+   * vacuously covered, which is correct for a standalone/unpaired device.
    */
   isOpCovered(device: string, seq: number): boolean {
     for (const other of this.roster()) {
@@ -124,7 +144,7 @@ export class SyncEngine {
    * (which picks up whatever the running cycle missed).
    */
   syncNow(): Promise<void> {
-    if (this.closed) return Promise.resolve();
+    if (this.closed || this.paused) return Promise.resolve();
     if (this.running) {
       this.queued ??= this.running
         .catch(() => undefined)
@@ -143,6 +163,10 @@ export class SyncEngine {
 
   private async runCycle(): Promise<void> {
     setSyncStatus("syncing");
+    // Recomputed from THIS cycle's fetches — "outdated" must clear once the
+    // offending peer stops publishing rows we can't read, rather than
+    // latching until reload (the exact defect ADR-007/010 called out).
+    this.sawUnsupported = false;
     try {
       await this.underLock(async () => {
         await this.flushLocked();
@@ -179,11 +203,18 @@ export class SyncEngine {
     this.locked = false;
     const pending = this.store.unpublished(this.entity);
     if (pending.length === 0) return;
-    await this.transport.publish(
+    // Only ops the transport reports as actually sent are flagged published.
+    // A Noop transport (no peers configured) and a transport closed mid-run
+    // both report none, so their ops stay queued — flagging them would leave
+    // a permanent hole under a future head announcement that no peer could
+    // ever fetch past.
+    const { publishedHashes } = await this.transport.publish(
       this.entity,
       pending.map((row) => ({ op: opFromStored(row), payloadJson: row.payloadJson })),
     );
-    await this.store.markPublished(pending.map((row) => row.hash));
+    if (publishedHashes.length > 0) {
+      await this.store.markPublished(publishedHashes);
+    }
   }
 
   private async pullLocked(): Promise<void> {
@@ -217,11 +248,17 @@ export class SyncEngine {
 
       let progressed = false;
       for (const fetched of ops.sort((a, b) => a.op.header.seq - b.op.header.seq)) {
+        // The fetch is entity-scoped; a row claiming a different entity is a
+        // protocol violation, and storing it would file the op under a log
+        // this engine never materializes or hydrates.
+        if (fetched.op.header.entity !== this.entity) continue;
         const verdict = await this.store.ingest(fetched.op, fetched.payloadBytes);
         if (verdict === "stored") progressed = true;
-        // "gap": an earlier row hasn't reached the relay yet — retry loop
-        // refetches from the new local head. "fork"/"invalid": quarantined
-        // by policy at ingest (head untouched); surfaced via degraded status.
+        // "gap": an earlier row hasn't reached the relay yet — the retry loop
+        // refetches from the new local head. "fork"/"invalid": rejected
+        // without touching the head, so the chain can't be corrupted; they
+        // are dropped rather than stored (only a stored op whose PAYLOAD
+        // fails to fold becomes a visible quarantine entry — see materialize).
       }
       if (!progressed) return;
     }
@@ -254,23 +291,42 @@ export class SyncEngine {
     return withSyncEngineLock(fn);
   }
 
-  /** Tear down and rebuild the transport (post-pairing / recovery import). */
+  /**
+   * Tear down and rebuild the transport after the identity or space changed
+   * (pairing import, recovery restore).
+   *
+   * The new transport authenticates a DIFFERENT Gun user graph, so anything
+   * this device published before is unreachable there: its own ops are
+   * re-queued for publication. Without that, a device with pre-pairing
+   * history would announce a head above ops the new peers can never fetch,
+   * and its whole log would be permanently un-ingestable by them.
+   */
   async restart(): Promise<void> {
-    for (const unsubscribe of this.unsubscribers) unsubscribe();
-    this.unsubscribers = [];
-    await this.transport.close();
-    this.remoteHeads.clear();
-    this.acksByDevice.clear();
-    this.sawUnsupported = false;
-    this.locked = false;
-    this.transport = this.makeTransport();
-    this.subscribe();
+    this.paused = true;
+    try {
+      // Let an in-flight cycle finish rather than cutting its publish run
+      // partway and immediately re-publishing the same range.
+      await this.running?.catch(() => undefined);
+      for (const unsubscribe of this.unsubscribers) unsubscribe();
+      this.unsubscribers = [];
+      await this.transport.close();
+      this.remoteHeads.clear();
+      this.acksByDevice.clear();
+      this.sawUnsupported = false;
+      this.locked = false;
+      await this.store.resetOwnPublished(this.entity);
+      this.transport = this.makeTransport();
+      this.subscribe();
+    } finally {
+      this.paused = false;
+    }
     await this.syncNow().catch(() => undefined);
   }
 
   async close(): Promise<void> {
     this.closed = true;
     if (this.interval) clearInterval(this.interval);
+    await this.running?.catch(() => undefined);
     for (const unsubscribe of this.unsubscribers) unsubscribe();
     this.unsubscribers = [];
     await this.transport.close();

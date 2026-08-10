@@ -30,6 +30,24 @@ export type PairingPayload = {
   inviterDevice: InviterDevice;
 };
 
+/**
+ * 6 digits derived from the space identity.
+ *
+ * KNOWN LIMITATION — this is a transfer checksum, NOT an authentication of
+ * the sender, and it does not stop an attacker who controls the pairing
+ * channel. Every input (`spaceId`, `pubs`) is chosen by whoever authored the
+ * payload, and the digest is only 10^6 wide: an attacker who intercepts a
+ * genuine code reads its `sasDigits`, then grinds candidate `spaceId` values
+ * against their own keys until their forged payload derives the SAME six
+ * digits — well under a second offline. The victim compares digits with the
+ * genuine device, they match, and the forged payload is accepted.
+ *
+ * A SAS that actually resists this has to bind an interactive exchange
+ * (commitment to both sides' fresh ephemeral values), which the current
+ * one-way QR/JSON flow has no room for. Tracked as a v0.2 item alongside
+ * p2panda-auth; until then treat the pairing channel itself as the trust
+ * boundary — only pair over a channel an attacker cannot rewrite.
+ */
 export async function deriveSasDigits(spaceId: string, pubs: readonly string[]): Promise<string> {
   const material = [spaceId, ...[...pubs].sort()].join("|");
   const digest = new Uint8Array(
@@ -117,11 +135,11 @@ export function parsePairingJson(text: string): PairingPayload {
  * Parse + structurally validate a pairing payload and compute its SAS,
  * WITHOUT touching storage. `payload.sasDigits` is self-derived from data
  * inside the same payload (spaceId + pub), so this only catches corruption
- * / typos in transit — it does NOT authenticate the sender. Callers must
- * show the returned SAS to the user and get an out-of-band confirmation
- * (the code read from the other device) before calling
- * {@link commitPairingPayload} — see its doc comment for why that step is
- * the one that actually matters.
+ * / typos in transit — it does NOT authenticate the sender, and neither
+ * does the confirmation step that follows it (see {@link deriveSasDigits}
+ * for the grinding attack that defeats it). Callers still show the SAS and
+ * require confirmation before {@link commitPairingPayload}, because it
+ * catches the common non-adversarial mistakes.
  */
 export async function previewPairingPayload(raw: string | PairingPayload): Promise<PairingPayload> {
   const payload = typeof raw === "string" ? parsePairingJson(raw) : parsePairingPayload(raw);
@@ -140,14 +158,14 @@ export async function previewPairingPayload(raw: string | PairingPayload): Promi
 /**
  * Persist a previewed pairing payload's SEA pair + space key locally.
  *
- * `expectedSas` is required and MUST come from the user manually reading it
- * off the other, genuine device (voice, in person, etc — any channel an
- * attacker substituting the QR/JSON in transit doesn't also control). This
- * is the actual security boundary: `payload.sasDigits` is computed purely
- * from data the sender of the payload controls, so an attacker crafting a
- * whole fake payload (fake pair + fake spaceId) trivially produces one that
- * is internally self-consistent — {@link previewPairingPayload} alone
- * cannot detect that. Only a human confirming the SAS out-of-band can.
+ * `expectedSas` is required and should come from the user reading it off the
+ * other, genuine device. That catches the easy cases — a payload pasted from
+ * the wrong device, a truncated or corrupted transfer, a stale code.
+ *
+ * It does NOT stop an attacker who can rewrite the pairing channel: the SAS
+ * is only 10^6 wide over sender-chosen inputs, so a forged payload can be
+ * ground to match the genuine digits (see {@link deriveSasDigits}). Do not
+ * treat this check as the security boundary — the channel is.
  */
 export async function commitPairingPayload(
   payload: PairingPayload,

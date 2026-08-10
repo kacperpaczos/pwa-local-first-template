@@ -257,12 +257,18 @@ export async function downloadAiModel(signal?: AbortSignal, tier?: AiTier): Prom
     return;
   }
 
-  const fromCache =
-    status.kind === "available"
-      ? status.cached
-      : await refreshAiCacheStatus(tier).catch(() => false);
-
+  // Assigned synchronously, before ANY await: an await between the
+  // `downloadInFlight` check above and this assignment would let two rapid
+  // callers both start a download, and the second's lock request would
+  // overwrite the module-level `engineLockDone` with its own already-settled
+  // promise — orphaning the real hold and reintroducing the spurious
+  // "AI active in another tab" this bookkeeping exists to prevent.
   downloadInFlight = (async () => {
+    const fromCache =
+      status.kind === "available"
+        ? status.cached
+        : await refreshAiCacheStatus(tier).catch(() => false);
+
     const gotLock = await tryAcquireAiEngineLock();
     if (!gotLock) {
       const message = "AI active in another tab";

@@ -64,9 +64,14 @@ export function ensureDeviceKey(
 }
 
 /**
- * Drop the stored key so the next boot mints a new device identity.
- * Used by recovery: a restored device is a NEW writer with an empty log —
- * reusing the old device id would fork the old device's log.
+ * Drop the stored key so the next boot mints a new device identity, with a
+ * fresh (empty) log.
+ *
+ * Deliberately NOT part of recovery: restoring a recovery bundle swaps the
+ * space key, but this is still the same device with the same intact log, and
+ * abandoning that log would strand every op already published under it. A
+ * genuinely new device has no stored key to begin with and mints one on
+ * first boot. Kept for DEV tooling and tests.
  */
 export function clearDeviceKey(storage: Pick<Storage, "removeItem"> = localStorage): void {
   storage.removeItem(DEVICE_KEY_STORAGE_KEY);
