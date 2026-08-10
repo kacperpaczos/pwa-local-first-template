@@ -16,6 +16,7 @@ import {
   type HeadAnnouncement,
   type LogSyncTransport,
   type PublishableOp,
+  type PublishResult,
   type Unsubscribe,
 } from "./transport";
 
@@ -182,27 +183,45 @@ export class GunLogTransport implements LogSyncTransport {
     }
   }
 
-  async publish(entity: string, ops: readonly PublishableOp[]): Promise<void> {
+  async publish(entity: string, ops: readonly PublishableOp[]): Promise<PublishResult> {
     await this.readyPromise;
-    if (this.closed || ops.length === 0) return;
+    if (this.closed || ops.length === 0) return { publishedHashes: [] };
 
     const root = this.entityRoot(entity);
-    let head: { device: string; seq: number; hash: string } | null = null;
+    // Ascending seq per device, so a partial run always leaves a contiguous
+    // prefix on the mesh — never a hole under an announced head.
+    const ordered = [...ops].sort((a, b) =>
+      a.op.header.publicKey === b.op.header.publicKey
+        ? a.op.header.seq - b.op.header.seq
+        : a.op.header.publicKey < b.op.header.publicKey
+          ? -1
+          : 1,
+    );
 
-    for (const { op, payloadJson } of ops) {
+    const publishedHashes: string[] = [];
+    const heads = new Map<string, { seq: number; hash: string }>();
+
+    for (const { op, payloadJson } of ordered) {
+      // A close (teardown, pairing restart) mid-run stops here: the rows
+      // already put stay valid, the rest stay queued for the next session.
+      if (this.closed) break;
       const ciphertext = await this.sealPayload(op.hash, payloadJson);
       const row = wireRowFromOp(op, ciphertext);
       await gunPut(root.get("logs").get(op.header.publicKey).get(String(op.header.seq)), row);
-      if (!head || op.header.seq > head.seq) {
-        head = { device: op.header.publicKey, seq: op.header.seq, hash: op.hash };
+      publishedHashes.push(op.hash);
+      const known = heads.get(op.header.publicKey);
+      if (!known || op.header.seq > known.seq) {
+        heads.set(op.header.publicKey, { seq: op.header.seq, hash: op.hash });
       }
     }
 
-    if (head) {
-      // Announced only AFTER all rows are durably put — a peer that sees the
-      // head can fetch every row at or below it.
-      await gunPut(root.get("heads").get(head.device), { seq: head.seq, hash: head.hash });
+    for (const [device, head] of heads) {
+      // Announced only AFTER the rows below it are durably put — a peer that
+      // sees the head can fetch every row at or below it.
+      await gunPut(root.get("heads").get(device), { seq: head.seq, hash: head.hash });
     }
+
+    return { publishedHashes };
   }
 
   async publishAcks(entity: string, device: string, acks: Record<string, number>): Promise<void> {
@@ -211,80 +230,97 @@ export class GunLogTransport implements LogSyncTransport {
     await gunPut(this.entityRoot(entity).get("acks").get(device), { json: JSON.stringify(acks) });
   }
 
-  subscribeHeads(entity: string, cb: (head: HeadAnnouncement) => void): Unsubscribe {
+  /**
+   * Shared teardown for a `.map().on()` subscription.
+   *
+   * `.map().on()` fires per child node, each with its OWN `ev.off()` that
+   * detaches only that child's listener — capturing just the first one would
+   * leave every other child attached to the shared Gun instance after
+   * unsubscribe (they outlive `restart()` and would feed stale head/ack
+   * announcements from the previous space into the new engine). Every `ev`
+   * seen is collected, and `active` gates the callback so a listener that is
+   * still attached can never deliver into a torn-down subscription.
+   */
+  private subscribeMapped<T>(
+    entity: string,
+    node: "heads" | "acks",
+    handle: (raw: unknown, key: string, emit: (value: T) => void) => void,
+    cb: (value: T) => void,
+  ): Unsubscribe {
     let active = true;
-    let off: (() => void) | null = null;
+    const offs = new Set<() => void>();
 
     void this.readyPromise.then(() => {
       if (!active || this.closed) return;
-      const chain = this.entityRoot(entity)
-        .get("heads")
+      this.entityRoot(entity)
+        .get(node)
         .map()
-        .on((raw: unknown, device: string, _msg: unknown, ev?: { off?: () => void }) => {
-          if (ev?.off && !off) {
-            off = () => ev.off?.();
-            if (!active) off();
+        .on((raw: unknown, key: string, _msg: unknown, ev?: { off?: () => void }) => {
+          const off = ev?.off;
+          if (off) {
+            const detach = () => off();
+            if (!active) {
+              detach();
+              return;
+            }
+            offs.add(detach);
           }
-          if (!raw || typeof raw !== "object" || device === "_") return;
-          const row = raw as { seq?: unknown; hash?: unknown };
-          const seq = Number(row.seq);
-          if (!Number.isInteger(seq) || seq < 1 || typeof row.hash !== "string") return;
-          cb({ device, seq, hash: row.hash });
+          if (!active) return;
+          handle(raw, key, cb);
         });
-      void chain;
     });
 
     const unsubscribe = () => {
       active = false;
-      off?.();
+      for (const off of offs) off();
+      offs.clear();
       this.unsubscribers.delete(unsubscribe);
     };
     this.unsubscribers.add(unsubscribe);
     return unsubscribe;
   }
 
+  subscribeHeads(entity: string, cb: (head: HeadAnnouncement) => void): Unsubscribe {
+    return this.subscribeMapped<HeadAnnouncement>(
+      entity,
+      "heads",
+      (raw, device, emit) => {
+        if (!raw || typeof raw !== "object" || device === "_") return;
+        const row = raw as { seq?: unknown; hash?: unknown };
+        const seq = Number(row.seq);
+        if (!Number.isInteger(seq) || seq < 1 || typeof row.hash !== "string") return;
+        emit({ device, seq, hash: row.hash });
+      },
+      cb,
+    );
+  }
+
   subscribeAcks(
     entity: string,
     cb: (device: string, acks: Record<string, number>) => void,
   ): Unsubscribe {
-    let active = true;
-    let off: (() => void) | null = null;
-
-    void this.readyPromise.then(() => {
-      if (!active || this.closed) return;
-      this.entityRoot(entity)
-        .get("acks")
-        .map()
-        .on((raw: unknown, device: string, _msg: unknown, ev?: { off?: () => void }) => {
-          if (ev?.off && !off) {
-            off = () => ev.off?.();
-            if (!active) off();
-          }
-          if (!raw || typeof raw !== "object" || device === "_") return;
-          const json = (raw as { json?: unknown }).json;
-          if (typeof json !== "string") return;
-          try {
-            const parsed = JSON.parse(json) as Record<string, unknown>;
-            const acks: Record<string, number> = {};
-            for (const [key, value] of Object.entries(parsed)) {
-              if (typeof value === "number" && Number.isInteger(value) && value >= 0) {
-                acks[key] = value;
-              }
+    return this.subscribeMapped<{ device: string; acks: Record<string, number> }>(
+      entity,
+      "acks",
+      (raw, device, emit) => {
+        if (!raw || typeof raw !== "object" || device === "_") return;
+        const json = (raw as { json?: unknown }).json;
+        if (typeof json !== "string") return;
+        try {
+          const parsed = JSON.parse(json) as Record<string, unknown>;
+          const acks: Record<string, number> = {};
+          for (const [key, value] of Object.entries(parsed)) {
+            if (typeof value === "number" && Number.isInteger(value) && value >= 0) {
+              acks[key] = value;
             }
-            cb(device, acks);
-          } catch {
-            /* corrupt ack row — ignore */
           }
-        });
-    });
-
-    const unsubscribe = () => {
-      active = false;
-      off?.();
-      this.unsubscribers.delete(unsubscribe);
-    };
-    this.unsubscribers.add(unsubscribe);
-    return unsubscribe;
+          emit({ device, acks });
+        } catch {
+          /* corrupt ack row — ignore */
+        }
+      },
+      ({ device, acks }) => cb(device, acks),
+    );
   }
 
   async fetchOps(

@@ -58,7 +58,15 @@ export function wireRowFromOp(op: Operation, ciphertext: string): WireOpRow {
   };
 }
 
-/** Rebuild the signed Operation from a validated wire row (v already checked). */
+/**
+ * Rebuild the signed Operation from a validated wire row (v already checked).
+ *
+ * Stamping `OPLOG_VERSION` rather than `row.v` is only safe while the
+ * supported range is a single version: the version is part of the signed,
+ * hashed header, so widening `[SUPPORTED_MIN_V, SUPPORTED_MAX_V]` without
+ * carrying `row.v` through here would make every non-current row fail hash
+ * verification at ingest.
+ */
 export function opFromWireRow(row: WireOpRow): Operation {
   const header: OpHeader = {
     v: OPLOG_VERSION,

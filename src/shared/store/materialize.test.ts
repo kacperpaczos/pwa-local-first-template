@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createBodyDoc, updateBodyDoc } from "@/shared/db/crdt";
-import { resetLamportForTests } from "@/shared/db/lamport";
+import { nextLamport, peekLamport, resetLamportForTests } from "@/shared/db/lamport";
 import type { Note } from "@/shared/db/schemas";
 import { generateDeviceKey } from "@/shared/identity/device";
 import { MemoryOpLogPersistence } from "./oplog-persistence";
@@ -137,6 +137,57 @@ describe("materializeNoteOps", () => {
     const final = await materializeNoteOps(store, target);
     expect(final.pending).toEqual([]);
     expect(map.get("ghost")?.deleted_at).toBe("2026-02-01T00:00:00.000Z");
+  });
+
+  it("rejects an out-of-range lamport instead of freezing the clock (poisoned counter)", async () => {
+    resetLamportForTests();
+    const store = makeStore();
+    const { map, target } = makeTarget();
+
+    await ingestChain(store, [
+      // Above 2^53 `Math.max(clock, hint) + 1 === clock` — the clock would
+      // stop advancing and every later local edit would collide.
+      { kind: "upsert", note: { ...note({ id: "poison" }), title_lamport: 1e300 } },
+      { kind: "upsert", note: note({ id: "healthy", title: "survivor" }) },
+    ]);
+
+    const result = await materializeNoteOps(store, target);
+    expect(result.quarantined).toHaveLength(1);
+    expect(map.get("poison")).toBeUndefined();
+    expect(map.get("healthy")?.title).toBe("survivor");
+
+    // The clock still moves for ordinary edits.
+    const before = peekLamport();
+    expect(nextLamport()).toBe(before + 1);
+  });
+
+  it("does not quarantine a valid op when the WRITE fails — it retries next cycle", async () => {
+    resetLamportForTests();
+    const store = makeStore();
+    const { map, target } = makeTarget();
+    let failNext = true;
+    const flaky: MaterializeTarget = {
+      getNote: target.getNote,
+      upsertNote: async (n) => {
+        if (failNext) {
+          failNext = false;
+          throw new Error("QuotaExceededError");
+        }
+        await target.upsertNote(n);
+      },
+    };
+
+    await ingestChain(store, [{ kind: "upsert", note: note({ id: "n1", title: "keep me" }) }]);
+
+    // A storage failure says nothing about the op's validity, and quarantine
+    // is permanent — so it must propagate, not silently discard the op.
+    await expect(materializeNoteOps(store, flaky)).rejects.toThrow(/Quota/);
+    expect(store.quarantined(ENTITY)).toEqual([]);
+    expect(store.unapplied(ENTITY)).toHaveLength(1);
+
+    const retry = await materializeNoteOps(store, flaky);
+    expect(retry.applied).toHaveLength(1);
+    expect(map.get("n1")?.title).toBe("keep me");
   });
 
   it("converges independently of cross-device op arrival order", async () => {

@@ -67,19 +67,85 @@ describe("OpLogStore.append", () => {
     expect(next.header.seq).toBe(3);
   });
 
-  it("recovers the height from the cross-tab counter when persistence lags (old bug 2)", async () => {
-    const { device, counter, store } = makeStore();
-    await store.append(ENTITY, { kind: "upsert", note: { id: "a" } });
+  it("a second tab appends on top of the first tab's op without duplicating seq (old bug 2)", async () => {
+    // Both tabs share one database (BrowserCollectionCoordinator) and one
+    // localStorage counter, but each has its own store instance whose read
+    // index is only hydrated at boot.
+    const persistence = new MemoryOpLogPersistence();
+    const device = generateDeviceKey();
+    const counter = memoryHeadCounter();
+
+    const tabA = new OpLogStore({ persistence, device, headCounter: counter });
+    const tabB = new OpLogStore({ persistence, device, headCounter: counter });
+    tabA.hydrate([ENTITY]);
+    tabB.hydrate([ENTITY]); // both hydrated while the log was empty
+
+    const first = await tabA.append(ENTITY, { kind: "upsert", note: { id: "a" } });
     expect(counter.get(ENTITY)).toBe(1);
 
-    // Second tab: fresh (empty) collection replica, SAME localStorage counter.
-    const lagging = new MemoryOpLogPersistence();
-    const tabB = new OpLogStore({ persistence: lagging, device, headCounter: counter });
-    await expect(tabB.append(ENTITY, { kind: "upsert", note: { id: "b" } })).rejects.toThrow(
-      /height 1/,
+    // Tab B's index is stale, but the row IS in the shared database — B must
+    // re-read rather than fail or reuse seq 1.
+    const second = await tabB.append(ENTITY, { kind: "upsert", note: { id: "b" } });
+    expect(second.header.seq).toBe(2);
+    expect(second.header.backlink).toBe(first.hash);
+
+    // ...and the tab stays usable for every subsequent write.
+    const third = await tabB.append(ENTITY, { kind: "upsert", note: { id: "c" } });
+    expect(third.header.seq).toBe(3);
+  });
+
+  it("self-heals when the head row was lost after its op was persisted", async () => {
+    const { persistence, device, counter, store } = makeStore();
+    const first = await store.append(ENTITY, { kind: "upsert", note: { id: "a" } });
+
+    // Simulate a crash between putOp and putHead: the op is durable, the
+    // head row and the counter never landed.
+    const withoutHead = new MemoryOpLogPersistence();
+    await withoutHead.putOp(persistence.getOp(first.hash)!);
+    const recovered = new OpLogStore({
+      persistence: withoutHead,
+      device,
+      headCounter: memoryHeadCounter(),
+    });
+    recovered.hydrate([ENTITY]);
+
+    // Must chain onto the orphaned op, NOT reissue seq 1 (which would fork
+    // this device's own log against any peer that already has op 1).
+    const next = await recovered.append(ENTITY, { kind: "upsert", note: { id: "b" } });
+    expect(next.header.seq).toBe(2);
+    expect(next.header.backlink).toBe(first.hash);
+    void counter;
+  });
+
+  it("throws rather than forking when the op at the counter's height is truly gone", async () => {
+    const { device, counter, store } = makeStore();
+    await store.append(ENTITY, { kind: "upsert", note: { id: "a" } });
+
+    // Empty database + a counter that says height 1: the op is unrecoverable,
+    // so extending is impossible without reusing seq 1.
+    const empty = new MemoryOpLogPersistence();
+    const stranded = new OpLogStore({ persistence: empty, device, headCounter: counter });
+    stranded.hydrate([ENTITY]);
+    await expect(stranded.append(ENTITY, { kind: "upsert", note: { id: "b" } })).rejects.toThrow(
+      /op 1 is missing/,
     );
-    // The counter refuses to re-issue seq 1 — better a loud error than a
-    // silent overlapping seq that would fork the log.
+  });
+
+  it("resetOwnPublished re-queues only this device's ops (space change)", async () => {
+    const { store } = makeStore();
+    const remote = generateDeviceKey();
+    const mine = await store.append(ENTITY, { kind: "upsert", note: { id: "a" } });
+    const theirs = remoteOp(remote, 1, null);
+    await store.ingest(theirs.op, theirs.bytes);
+    await store.markPublished([mine.hash]);
+    expect(store.unpublished(ENTITY)).toEqual([]);
+
+    await store.resetOwnPublished(ENTITY);
+
+    const requeued = store.unpublished(ENTITY);
+    expect(requeued.map((row) => row.hash)).toEqual([mine.hash]);
+    // The remote device's op belongs to its own log — we must not republish it.
+    expect(requeued.some((row) => row.hash === theirs.op.hash)).toBe(false);
   });
 
   it("serializes concurrent appends to distinct seqs", async () => {

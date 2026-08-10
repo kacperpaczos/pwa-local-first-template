@@ -33,7 +33,37 @@ migration itself, since p2panda has no stable browser binding yet.
   incompatible row is seen — it is recomputed every cycle.
 - Tombstone garbage collection now requires every known peer to have
   actually acknowledged a deletion before hard-deleting it, closing a path
-  where a note could resurrect after being GC'd locally.
+  where a note could resurrect after being GC'd locally. The peer roster
+  counts devices from persisted log heads, and the startup pass runs after
+  the first sync cycle, so the gate is evaluated against real acknowledgement
+  state rather than an empty in-memory table on every boot.
+- Ops are flagged as published only when the transport reports they actually
+  went out. Previously an offline-only build (no relay configured) or a
+  transport closed mid-flush marked them published anyway, which stranded the
+  whole log: the next head announcement sat above rows no peer could fetch.
+- Pairing or recovery now re-queues this device's own log for publication.
+  Its previous ops were published to a Gun user graph the device can no
+  longer reach, so without this a device with pre-pairing history never
+  delivered it and left a permanent fetch gap for its new peers.
+- A second browser tab can append to the log again. It previously failed
+  every write for the tab's lifetime once a sibling tab appended, because the
+  cross-tab counter ran ahead of that tab's in-memory index.
+- An append interrupted between its two durable writes no longer risks
+  forking this device's own log — height is derived from the highest stored
+  op as well as the head row.
+- Peer-supplied Lamport counters are range-checked, and the clock advances
+  only for ops that actually applied. A single signed op with a counter at or
+  above 2^53 could previously freeze the clock permanently, degrading LWW to
+  its tie-break for every later edit.
+- A failed *write* during materialization no longer permanently quarantines a
+  valid op; quarantine is now reserved for payloads this device cannot decode
+  or merge, and infrastructure failures retry.
+- Backup import and export work on the corrupt-database recovery screen,
+  which previously threw on the first note (the op-log index was never
+  hydrated on that path).
+- Gun subscriptions detach every child listener on unsubscribe and stop
+  delivering into a torn-down subscription; previously only the first child
+  was detached and stale announcements could reach a restarted engine.
 - Pairing's legacy-import fallback, which routed a failed v2 parse straight
   around SAS confirmation, is removed.
 - A Web Locks race could make "unload immediately followed by load" the AI
@@ -54,6 +84,17 @@ migration itself, since p2panda has no stable browser binding yet.
   project) alongside the existing node-environment unit project.
 - Completed PWA manifest (maskable + any icon variants, install
   screenshots), install-prompt button, app error boundary, 404 route.
+
+### Known limitations worth calling out
+
+- **The 6-digit pairing SAS authenticates nothing.** It is a transfer
+  checksum: the digits derive from inputs the payload's own author chooses,
+  over a 10^6 space, so an attacker who can rewrite the pairing channel can
+  grind a forged payload that displays the genuine device's digits in well
+  under a second. `pairing.test.ts` demonstrates the attack and asserts the
+  current (insecure) behavior, so replacing it with an interactive SAS — a
+  v0.2 item alongside `p2panda-auth` — fails loudly rather than silently.
+  Until then, pair only over a channel an attacker cannot rewrite.
 
 ### Removed
 

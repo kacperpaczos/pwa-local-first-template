@@ -7,12 +7,14 @@ import { MemoryOpLogPersistence } from "@/shared/store/oplog-persistence";
 import { OpLogStore, memoryHeadCounter } from "@/shared/store/oplog-store";
 import type { MaterializeTarget } from "@/shared/store/materialize";
 import { SyncEngine } from "./engine";
+import { NoopLogTransport } from "./noop-transport";
 import { syncStatusStore } from "./status";
 import type {
   FetchResult,
   HeadAnnouncement,
   LogSyncTransport,
   PublishableOp,
+  PublishResult,
   Unsubscribe,
 } from "./transport";
 
@@ -40,13 +42,15 @@ class FakeHubTransport implements LogSyncTransport {
 
   async ready(): Promise<void> {}
 
-  async publish(entity: string, ops: readonly PublishableOp[]): Promise<void> {
+  async publish(entity: string, ops: readonly PublishableOp[]): Promise<PublishResult> {
     let head: HeadAnnouncement | null = null;
+    const publishedHashes: string[] = [];
     for (const { op, payloadJson } of ops) {
       this.hub.rows.set(this.hub.key(entity, op.header.publicKey, op.header.seq), {
         op,
         payloadJson,
       });
+      publishedHashes.push(op.hash);
       if (!head || op.header.seq > head.seq) {
         head = { device: op.header.publicKey, seq: op.header.seq, hash: op.hash };
       }
@@ -55,6 +59,7 @@ class FakeHubTransport implements LogSyncTransport {
       this.hub.heads.set(`${entity}/${head.device}`, head);
       for (const listener of this.hub.headListeners) listener(head);
     }
+    return { publishedHashes };
   }
 
   async publishAcks(_entity: string, device: string, acks: Record<string, number>): Promise<void> {
@@ -113,7 +118,7 @@ function note(partial: Partial<Note> & Pick<Note, "id">): Note {
   };
 }
 
-function makePeer(hub: FakeHub) {
+function makePeer(hub: FakeHub, transport?: () => LogSyncTransport) {
   const persistence = new MemoryOpLogPersistence();
   const device = generateDeviceKey();
   const counter = memoryHeadCounter();
@@ -125,7 +130,7 @@ function makePeer(hub: FakeHub) {
   };
   const engine = new SyncEngine({
     store,
-    transport: () => new FakeHubTransport(hub),
+    transport: transport ?? (() => new FakeHubTransport(hub)),
     target,
     disableInterval: true,
     // Deterministic control in tests: only the syncNow() calls we make run —
@@ -249,6 +254,71 @@ describe("SyncEngine", () => {
     await peerB.engine.close();
   });
 
+  it("a transport that sends nothing (no peers) leaves ops queued, and they ship once a relay exists", async () => {
+    resetLamportForTests();
+    const hub = new FakeHub();
+    // Offline-only build: VITE_GUN_PEERS unset → NoopLogTransport.
+    const peerA = makePeer(hub, () => new NoopLogTransport());
+
+    await peerA.store.append("notes", { kind: "upsert", note: note({ id: "n1" }) });
+    await peerA.store.append("notes", { kind: "upsert", note: note({ id: "n2" }) });
+    await peerA.engine.syncNow();
+
+    // Marking these published would strand them: a later head announcement
+    // would sit above rows no peer can ever fetch.
+    expect(peerA.store.unpublished("notes")).toHaveLength(2);
+
+    // A relay is configured later (rebuild) — the whole history must ship.
+    await peerA.engine.close();
+    const relayed = new SyncEngine({
+      store: peerA.store,
+      transport: () => new FakeHubTransport(hub),
+      target: { getNote: () => undefined, upsertNote: async () => undefined },
+      disableInterval: true,
+      reactive: false,
+    });
+    await relayed.syncNow();
+    expect(peerA.store.unpublished("notes")).toEqual([]);
+
+    const peerB = makePeer(hub);
+    await peerB.engine.syncNow();
+    expect(peerB.notes.get("n1")).toBeDefined();
+    expect(peerB.notes.get("n2")).toBeDefined();
+
+    await relayed.close();
+    await peerB.engine.close();
+  });
+
+  it("restart re-publishes this device's log into the new space (pairing)", async () => {
+    resetLamportForTests();
+    const oldSpace = new FakeHub();
+    const newSpace = new FakeHub();
+    let current = oldSpace;
+
+    const peerB = makePeer(oldSpace, () => new FakeHubTransport(current));
+    await peerB.store.append("notes", { kind: "upsert", note: note({ id: "pre1" }) });
+    await peerB.store.append("notes", { kind: "upsert", note: note({ id: "pre2" }) });
+    await peerB.engine.syncNow();
+    expect(peerB.store.unpublished("notes")).toEqual([]);
+
+    // B pairs into A's space: the transport now authenticates a different
+    // graph, where nothing B published before is reachable.
+    current = newSpace;
+    await peerB.engine.restart();
+
+    const peerA = makePeer(newSpace);
+    await peerA.engine.syncNow();
+
+    // Pre-pairing history must arrive, not be stranded behind stale
+    // published flags (which would also leave a permanent fetch gap).
+    expect(peerA.notes.get("pre1")).toBeDefined();
+    expect(peerA.notes.get("pre2")).toBeDefined();
+    expect(peerA.store.head("notes", peerB.device.deviceId)?.seq).toBe(2);
+
+    await peerA.engine.close();
+    await peerB.engine.close();
+  });
+
   it("isOpCovered is vacuously true with no known peers (standalone device, safe to GC)", async () => {
     resetLamportForTests();
     const hub = new FakeHub();
@@ -261,6 +331,37 @@ describe("SyncEngine", () => {
     expect(peerA.engine.isOpCovered(peerA.device.deviceId, op.header.seq)).toBe(true);
 
     await peerA.engine.close();
+  });
+
+  it("a peer known only from persisted heads still blocks coverage at boot (pre-subscription GC)", async () => {
+    resetLamportForTests();
+    const hub = new FakeHub();
+    const peerA = makePeer(hub);
+    const peerB = makePeer(hub);
+
+    await peerB.store.append("notes", { kind: "upsert", note: note({ id: "seed" }) });
+    await peerB.engine.syncNow();
+    await peerA.engine.syncNow(); // A now has B's log head persisted
+    const op = await peerA.store.append("notes", { kind: "upsert", note: note({ id: "n1" }) });
+    await peerA.engine.syncNow();
+
+    // "Reload" of A: a brand-new engine whose in-memory heads/acks are empty
+    // and whose subscriptions have not delivered anything yet — exactly the
+    // state the startup GC pass runs in.
+    await peerA.engine.close();
+    const rebooted = new SyncEngine({
+      store: peerA.store,
+      transport: () => new FakeHubTransport(hub),
+      target: { getNote: () => undefined, upsertNote: async () => undefined },
+      disableInterval: true,
+      reactive: false,
+    });
+
+    expect(rebooted.roster()).toContain(peerB.device.deviceId);
+    expect(rebooted.isOpCovered(peerA.device.deviceId, op.header.seq)).toBe(false);
+
+    await rebooted.close();
+    await peerB.engine.close();
   });
 
   it("requires an explicit ack once a peer is known, before enabling the GC coverage gate", async () => {

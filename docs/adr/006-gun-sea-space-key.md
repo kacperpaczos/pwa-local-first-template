@@ -9,7 +9,7 @@ Original Faza 4 planned WS + Ed25519/AES. Project standardized on Gun+SEA instea
 - Transport auth: Gun SEA pair, shared by every paired device (Gun user-graph write ACL only — not op attribution as of ADR-010).
 - Op attribution: per-device ed25519 keypair, generated locally, never transferred by pairing.
 - Content encryption: AES-256-GCM `spaceKey` (WebCrypto), sealed into pairing payload.
-- Pairing: QR/JSON + 6-digit SAS.
+- Pairing: QR/JSON + 6-digit SAS — a transfer checksum only. The digits derive from sender-chosen inputs over a 10^6 space, so a payload forged by an attacker controlling the channel can be ground to match the genuine device's digits; the pairing channel itself is the trust boundary. An interactive SAS is a v0.2 item (see ADR-010's p2panda-auth mapping).
 - Recovery: BIP39 12-word phrase wraps `spaceKey` (does not touch the SEA pair or device key).
 - Gun peer is untrusted for note contents; op envelope metadata (`seq`, `hash`, `v`) remains visible for routing.
 

@@ -9,7 +9,7 @@ import {
   type PairingPayload,
 } from "./pairing";
 import { loadStoredPair } from "./pair";
-import { loadSpaceId } from "./space";
+import { loadSpaceId, saveSpaceExported } from "./space";
 
 function memoryStorage(initial: Record<string, string> = {}): Storage {
   const map = new Map<string, string>(Object.entries(initial));
@@ -108,37 +108,81 @@ describe("pairing", () => {
     expect(loadStoredPair(deviceB)).toBeNull();
   });
 
-  it("a forged payload with its own consistent SAS still fails the real attack check", async () => {
-    // This models the actual MITM vector: an attacker doesn't tamper with a
-    // genuine payload's `sasDigits` field (that's the weaker, already-caught
-    // case above) — they mint an entirely fresh, self-consistent fake
-    // payload (own pair, own spaceId) whose sasDigits legitimately matches
-    // itself. previewPairingPayload alone CANNOT catch this — only a human
-    // comparing against the SAS the genuine sender's device shows can, via
-    // commitPairingPayload's required expectedSas.
-    const genuineDeviceA = memoryStorage();
-    const genuinePayload = await buildPairingPayload(genuineDeviceA);
+  it("a forged payload is caught only when its SAS happens to differ — the check is not a real gate", async () => {
+    // Models the MITM vector: the attacker mints a fresh, self-consistent
+    // payload (own pair, own spaceId). preview() cannot detect it, and the
+    // SAS confirmation only rejects it because these particular random
+    // values produced different digits.
+    const genuinePayload = await buildPairingPayload(memoryStorage());
     const genuineSas = genuinePayload.sasDigits;
 
-    const forgedDeviceX = memoryStorage();
-    const forgedPayload = await buildPairingPayload(forgedDeviceX);
+    const forgedPayload = await buildPairingPayload(memoryStorage());
     expect(forgedPayload.pair.pub).not.toBe(genuinePayload.pair.pub);
-    expect(forgedPayload.spaceId).not.toBe(genuinePayload.spaceId);
 
-    // The forged payload is internally self-consistent — preview succeeds.
     const previewed = await previewPairingPayload(forgedPayload as PairingPayload);
     expect(previewed.sasDigits).toBe(forgedPayload.sasDigits);
 
-    // But the victim was told the GENUINE device's SAS out-of-band, so
-    // commit must reject the forged payload (unless the attacker also
-    // brute-forces a collision, which is a separate, tracked hardening item).
     if (forgedPayload.sasDigits === genuineSas) {
-      // Astronomically unlikely (~1e-6) — treat as a non-flaky skip.
+      // ~1e-6 by chance here, but see the next test: an ATTACKER does not
+      // rely on chance, and this branch is the one they always reach.
       return;
     }
     await expect(commitPairingPayload(previewed, genuineSas, memoryStorage())).rejects.toThrow(
       /SAS/,
     );
+  });
+
+  it("KNOWN WEAKNESS: a ground SAS collision passes the confirmation gate", async () => {
+    // Documents the limitation stated on deriveSasDigits: the digits are 10^6
+    // wide over inputs the payload's author picks, so an attacker who reads a
+    // genuine code's SAS can search for their own spaceId that derives the
+    // same six digits. The victim then compares digits, sees a match, and
+    // imports the attacker's keys. This test asserts the CURRENT (insecure)
+    // behavior so that fixing it — an interactive SAS, tracked for v0.2 —
+    // fails here loudly instead of silently leaving this test green.
+    const genuineStorage = memoryStorage();
+    const genuine = await buildPairingPayload(genuineStorage);
+    const attacker = await buildPairingPayload(memoryStorage());
+
+    // The grind is ~10^6 digests for one fixed target. Amortized here over
+    // many possible genuine spaceIds so the test costs ~10^4 instead — the
+    // attacker's real cost against ONE target is still trivially small
+    // (sub-second offline), this only keeps the test fast and non-flaky.
+    const targets = new Map<string, string>();
+    for (let i = 0; i < 200; i++) {
+      const candidateSpaceId = `genuine-space-${i}`;
+      targets.set(await deriveSasDigits(candidateSpaceId, [genuine.pair.pub]), candidateSpaceId);
+    }
+
+    let collision: { attackerSpaceId: string; genuineSpaceId: string } | null = null;
+    for (let i = 0; i < 1_000_000 && collision === null; i++) {
+      const candidate = `attacker-space-${i}`;
+      const digits = await deriveSasDigits(candidate, [attacker.pair.pub]);
+      const genuineSpaceId = targets.get(digits);
+      if (genuineSpaceId) {
+        collision = { attackerSpaceId: candidate, genuineSpaceId };
+      }
+    }
+    expect(collision).not.toBeNull();
+
+    // The genuine device is the one holding the colliding spaceId, so the
+    // SAS its screen shows is exactly what the attacker ground for.
+    saveSpaceExported(collision!.genuineSpaceId, genuine.spaceKey, genuineStorage);
+    const genuinePayload = await buildPairingPayload(genuineStorage);
+    expect(genuinePayload.spaceId).toBe(collision!.genuineSpaceId);
+
+    const forged: PairingPayload = {
+      ...attacker,
+      spaceId: collision!.attackerSpaceId,
+      sasDigits: genuinePayload.sasDigits,
+    };
+
+    // Both gates pass, and the victim ends up holding the ATTACKER's keys.
+    const previewed = await previewPairingPayload(forged);
+    const victim = memoryStorage();
+    await commitPairingPayload(previewed, genuinePayload.sasDigits, victim);
+    expect(loadStoredPair(victim)).toEqual(attacker.pair);
+    expect(loadStoredPair(victim)).not.toEqual(genuinePayload.pair);
   });
 
   it("round-trips via JSON", async () => {
