@@ -45,7 +45,7 @@ So the gap this template fills is specifically: **browser-only, no backend serve
 | PWA | Vite + Workbox service worker |
 | AI | Optional on-device WebLLM, opt-in (summarize, meta, RAG, agent) |
 | Backup | JSON merge-import + SQL dump; integrity check + recovery |
-| Docs | [`docs/architecture.md`](docs/architecture.md) + [`docs/adr/`](docs/adr/) |
+| Docs | [`docs/architecture.md`](docs/architecture.md) + [`docs/adr/`](docs/adr/) + [`docs/BACKLOG.md`](docs/BACKLOG.md) |
 
 **Browser target:** Chromium (OPFS required). Safari / WebKit are out of scope for now.
 
@@ -102,7 +102,7 @@ p2panda is a different kind of thing than this template — it's a modular **eng
 
 **The practical integration hinge is layer 8.** `LogSyncTransport` is the one seam explicitly designed to be swapped without touching layers 1–3 or 6–7 — `p2panda-net`'s own browser story is iroh's "Browsers Alpha" (relay-only) as of this writing, so the seam exists but isn't switched on. Layer 5 (encryption) is the other realistic near-term swap point — `p2panda-encryption`'s scheme is a strict upgrade over the current single-shared-key model, if/when it ships a browser binding, and requires reimplementing `seal()`/`open()` in `shared/crypto/envelope.ts` plus wiring real group membership (which has no home in `shared/identity/space.ts` today — see [ADR-010](docs/adr/010-per-device-op-log.md)).
 
-Full non-comparative diagram, swap-point reference, and the module-by-module v0.2 mapping: [`docs/architecture.md`](docs/architecture.md) and [ADR-010](docs/adr/010-per-device-op-log.md). Decision history: [`docs/adr/`](docs/adr/).
+Full non-comparative diagram, swap-point reference, and the module-by-module v0.2 mapping: [`docs/architecture.md`](docs/architecture.md) and [ADR-010](docs/adr/010-per-device-op-log.md). Decision history: [`docs/adr/`](docs/adr/). What is still open, including the known security holes: [`docs/BACKLOG.md`](docs/BACKLOG.md).
 
 ---
 
