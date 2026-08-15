@@ -17,8 +17,8 @@
     "test": "vitest run",
     "test:unit": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test",
-    "test:e2e:sync": "playwright test --project=chromium-sync",
+    "test:e2e": "node scripts/e2e.mjs",
+    "test:e2e:sync": "node scripts/e2e.mjs --project=chromium-sync",
     "test:e2e:install": "playwright install chromium",
     "test:all": "pnpm test:unit && pnpm test:e2e",
     "check:no-e2e-hooks": "node scripts/check-no-e2e-hooks.mjs"

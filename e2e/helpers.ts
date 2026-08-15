@@ -8,7 +8,9 @@ import {
   type SeaPair,
 } from "../src/shared/identity/types";
 
-export const GUN_PEER_CTRL = "http://127.0.0.1:8765";
+// Port comes from the Playwright config (via scripts/e2e.mjs); 8765 is the
+// documented default when the suite is run without the wrapper.
+export const GUN_PEER_CTRL = `http://127.0.0.1:${process.env.GUN_PEER_PORT ?? "8765"}`;
 
 export async function resetGunPeer(): Promise<void> {
   const res = await fetch(`${GUN_PEER_CTRL}/test/reset`, { method: "POST" });
