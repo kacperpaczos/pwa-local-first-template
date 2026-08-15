@@ -29,7 +29,7 @@ export default defineConfig({
           include: ["src/**/*.{test,spec}.ts", "server/**/*.{test,spec}.ts"],
           // The layered projects below own these; without the exclude, `unit`
           // would run them a second time.
-          exclude: ["src/**/*.contract.test.ts"],
+          exclude: ["src/**/*.{contract,integration}.test.ts"],
         },
       },
       {
@@ -38,6 +38,14 @@ export default defineConfig({
           name: "contract",
           environment: "node",
           include: ["src/**/*.contract.test.ts"],
+        },
+      },
+      {
+        resolve: { alias },
+        test: {
+          name: "integration",
+          environment: "node",
+          include: ["src/**/*.integration.test.ts"],
         },
       },
       {
