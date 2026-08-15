@@ -1,5 +1,5 @@
 import type { OpLogStore } from "@/shared/store/oplog-store";
-import { materializeNoteOps, type MaterializeTarget } from "@/shared/store/materialize";
+import { materializeCounterOps, type MaterializeTarget } from "@/shared/store/materialize";
 import { opFromStored } from "./stored-op";
 import { SpaceUnavailableError, type LogSyncTransport } from "./transport";
 import { setSyncStatus, syncQuarantineCountStore, type SyncStatus } from "./status";
@@ -68,7 +68,7 @@ export class SyncEngine {
     this.store = options.store;
     this.makeTransport = options.transport;
     this.target = options.target;
-    this.entity = options.entity ?? "notes";
+    this.entity = options.entity ?? "counter";
     this.reactive = options.reactive ?? true;
     this.transport = this.makeTransport();
 
@@ -225,8 +225,7 @@ export class SyncEngine {
       await this.pullDevice(device, announcedSeq);
     }
 
-    const result = await materializeNoteOps(this.store, this.target);
-    void result;
+    await materializeCounterOps(this.store, this.target);
 
     await this.publishAcks();
   }

@@ -10,7 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 
 const ConflictHistorySection: Component = () => {
   const { db, facade } = useDb();
-  const quarantined = () => db.store.quarantined("notes");
+  const quarantined = () => db.store.quarantined(db.entity);
   const [status, setStatus] = createSignal<string | null>(null);
   const [busy, setBusy] = createSignal(false);
   const [conflictsOpen, setConflictsOpen] = createSignal(false);
@@ -21,10 +21,10 @@ const ConflictHistorySection: Component = () => {
   };
 
   const onRestoreConflict = createAsyncAction(setBusy, setStatus, async (entry: ConflictEntry) => {
-    if (entry.field !== "title" || entry.lostValue == null) return;
-    await facade.updateNote(entry.noteId, { title: entry.lostValue });
-    toast.success("Restored previous title");
-    setStatus(`Restored title for note ${entry.noteId.slice(0, 8)}…`);
+    if (entry.lostValue == null) return;
+    await facade.setLabel(entry.lostValue);
+    toast.success("Restored previous label");
+    setStatus("Restored the previous label");
     refreshConflicts();
   });
 
@@ -33,7 +33,7 @@ const ConflictHistorySection: Component = () => {
       <CardHeader>
         <CardTitle>Conflict history</CardTitle>
         <CardDescription>
-          Lost LWW values from sync merges (title / delete). Retained 30 days, max 200 entries.
+          Label values that lost a last-writer-wins merge. Retained 30 days, max 200 entries.
         </CardDescription>
       </CardHeader>
       <CardContent class="space-y-3">
@@ -68,9 +68,6 @@ const ConflictHistorySection: Component = () => {
                   <li class="rounded-md border p-3 text-sm">
                     <div class="mb-1 flex flex-wrap items-center gap-2">
                       <Badge variant="outline">{entry.field}</Badge>
-                      <span class="font-mono text-xs text-muted-foreground">
-                        {entry.noteId.slice(0, 8)}…
-                      </span>
                       <span class="text-xs text-muted-foreground">{entry.at}</span>
                     </div>
                     <p class="text-muted-foreground">
@@ -85,7 +82,7 @@ const ConflictHistorySection: Component = () => {
                         {entry.wonValue === null ? "(null)" : entry.wonValue}
                       </span>
                     </p>
-                    <Show when={entry.field === "title" && entry.lostValue != null}>
+                    <Show when={entry.lostValue != null}>
                       <Button
                         size="sm"
                         class="mt-2"

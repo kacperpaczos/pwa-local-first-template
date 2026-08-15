@@ -1,21 +1,38 @@
 import { expect, test } from "@playwright/test";
-import { createNote, uniqueTitle, waitForNotesReady } from "./helpers";
+import {
+  clickIncrement,
+  expectCounterValue,
+  expectLabel,
+  saveLabel,
+  waitForCounterReady,
+  waitForPublished,
+} from "./helpers";
 
-test("home redirects user toward notes", async ({ page }) => {
-  await page.goto("/");
-  await expect(page.getByRole("heading", { level: 1 })).toContainText("pwa-local-first-template");
-  await page.getByRole("link", { name: "Open notes" }).click();
-  await expect(page).toHaveURL(/\/notes$/);
+test("the counter renders and increments locally", async ({ page }) => {
+  await waitForCounterReady(page);
+  await expectCounterValue(page, 0);
+
+  await clickIncrement(page, 3);
+  await expectCounterValue(page, 3);
 });
 
-test("notes CRUD soft-delete flow", async ({ page }) => {
-  await waitForNotesReady(page);
+test("value and label survive a reload (OPFS persistence)", async ({ page }) => {
+  await waitForCounterReady(page);
 
-  const title = uniqueTitle("E2E note");
-  await createNote(page, title, "Treść testowa");
-  await expect(page.getByTestId("note-item").filter({ hasText: title })).toHaveCount(1);
+  await clickIncrement(page, 2);
+  await saveLabel(page, "smoke label");
+  await expectCounterValue(page, 2);
+  await waitForPublished(page);
 
-  const primary = page.getByTestId("note-item").filter({ hasText: title });
-  await primary.getByTestId("note-delete").click();
-  await expect(primary).toHaveCount(0);
+  await page.reload();
+  await waitForCounterReady(page);
+  await expectCounterValue(page, 2);
+  await expectLabel(page, "smoke label");
+});
+
+test("settings page renders its sections", async ({ page }) => {
+  await waitForCounterReady(page);
+  await page.goto("/settings");
+  await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+  await expect(page.getByTestId("storage-persist-status")).toBeVisible();
 });

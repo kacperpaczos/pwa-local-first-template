@@ -1,73 +1,75 @@
-import { expect, test } from "@playwright/test";
+import { test } from "@playwright/test";
 import {
-  createNote,
-  expectNoteHidden,
-  expectNoteVisible,
+  clickIncrement,
+  expectCounterValue,
+  expectLabel,
   openTwoPeers,
   resetGunPeer,
+  saveLabel,
   syncNow,
-  uniqueTitle,
-  waitForNoteSynced,
+  waitForPublished,
 } from "./helpers";
 
 test.beforeEach(async () => {
   await resetGunPeer();
 });
 
-test("create on A appears on B after Sync", async ({ browser }) => {
+test("an increment on A appears on B after Sync", async ({ browser }) => {
   const { contextA, contextB, pageA, pageB } = await openTwoPeers(browser);
 
-  const title = uniqueTitle("Gun note");
-  await createNote(pageA, title);
-  await expectNoteVisible(pageA, title);
-  await waitForNoteSynced(pageA, title);
+  await clickIncrement(pageA, 2);
+  await expectCounterValue(pageA, 2);
+  await waitForPublished(pageA);
 
   await syncNow(pageB);
-  await expectNoteVisible(pageB, title, 30_000);
+  await expectCounterValue(pageB, 2, 30_000);
 
   await contextA.close();
   await contextB.close();
 });
 
-test("soft-delete on A syncs to B; tombstone visible under Wszystkie", async ({ browser }) => {
+test("concurrent increments on A and B SUM — nobody's click is lost", async ({ browser }) => {
   const { contextA, contextB, pageA, pageB } = await openTwoPeers(browser);
 
-  const title = uniqueTitle("Gun delete");
-  await createNote(pageA, title);
-  await waitForNoteSynced(pageA, title);
+  // Both devices click before either has synced the other's ops.
+  await clickIncrement(pageA, 2);
+  await clickIncrement(pageB, 3);
+  await waitForPublished(pageA);
+  await waitForPublished(pageB);
+
+  await syncNow(pageA);
   await syncNow(pageB);
-  await expectNoteVisible(pageB, title, 30_000);
-
-  await pageA
-    .getByTestId("note-item")
-    .filter({ hasText: title })
-    .getByTestId("note-delete")
-    .click();
-  await expectNoteHidden(pageA, title);
-  await waitForNoteSynced(pageA, title);
-
-  await syncNow(pageB);
-  await expectNoteHidden(pageB, title, 30_000);
-
-  await pageB.getByTestId("filter-all").click();
-  await expect(pageB.getByTestId("note-item").filter({ hasText: title })).toHaveCount(1);
+  await expectCounterValue(pageA, 5, 30_000);
+  await expectCounterValue(pageB, 5, 30_000);
 
   await contextA.close();
   await contextB.close();
 });
 
-test("idempotent Sync on B does not duplicate the note", async ({ browser }) => {
+test("repeated Sync is idempotent — the total never inflates", async ({ browser }) => {
   const { contextA, contextB, pageA, pageB } = await openTwoPeers(browser);
 
-  const title = uniqueTitle("Gun idempotent");
-  await createNote(pageA, title);
-  await waitForNoteSynced(pageA, title);
+  await clickIncrement(pageA, 3);
+  await waitForPublished(pageA);
   await syncNow(pageB);
-  await expectNoteVisible(pageB, title, 30_000);
+  await expectCounterValue(pageB, 3, 30_000);
 
   await syncNow(pageB);
   await syncNow(pageB);
-  await expect(pageB.getByTestId("note-item").filter({ hasText: title })).toHaveCount(1);
+  await expectCounterValue(pageB, 3);
+
+  await contextA.close();
+  await contextB.close();
+});
+
+test("a label set on A wins deterministically on both devices", async ({ browser }) => {
+  const { contextA, contextB, pageA, pageB } = await openTwoPeers(browser);
+
+  await saveLabel(pageA, "shared counter");
+  await waitForPublished(pageA);
+
+  await syncNow(pageB);
+  await expectLabel(pageB, "shared counter", 30_000);
 
   await contextA.close();
   await contextB.close();

@@ -5,19 +5,16 @@ import {
   openBrowserWASQLiteOPFSDatabase,
   persistedCollectionOptions,
 } from "@tanstack/browser-db-sqlite-persistence";
-import { startOfflineExecutor } from "@tanstack/offline-transactions";
 import type { Collection } from "@tanstack/db";
-import type { OfflineExecutor } from "@tanstack/offline-transactions";
-import { parseNote, type Note } from "./schemas";
+import { COUNTER_ID, emptyCounter, type Counter } from "./schemas";
 import { ensureDeviceKey } from "@/shared/identity/device";
-import type { NoteOpPayload } from "@/shared/oplog/payload";
 import type { HeadRow, StoredOp } from "@/shared/store/oplog-persistence";
 import {
   CollectionOpLogPersistence,
   persistLocal,
 } from "@/shared/store/collection-oplog-persistence";
 import { OpLogStore } from "@/shared/store/oplog-store";
-import type { MaterializeTarget } from "@/shared/store/materialize";
+import { materializeCounterOps, type MaterializeTarget } from "@/shared/store/materialize";
 import { SyncEngine } from "@/shared/sync/engine";
 import { GunLogTransport, parseGunPeers } from "@/shared/sync/gun-log-transport";
 import { NoopLogTransport } from "@/shared/sync/noop-transport";
@@ -27,30 +24,28 @@ const DB_FILE = "pwa-local-first.sqlite";
 const DB_NAME = "pwa-local-first";
 
 /**
- * Bumped for the op-log clean break (v2 rows are ignored; on first v3 boot
- * existing local notes are re-published as genesis ops — see startSync).
- * All collections MUST share one schemaVersion: the persistence plugin
- * caches one adapter per (mode, schemaVersion) and re-registers it with the
- * coordinator on every collection setup; mixed versions clobber each other.
+ * Bumped for the counter domain reset (ADR-012): the notes-era tables are
+ * not read. All collections MUST share one schemaVersion: the persistence
+ * plugin caches one adapter per (mode, schemaVersion) and re-registers it
+ * with the coordinator on every collection setup; mixed versions clobber
+ * each other.
  */
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
-export const SYNC_ENTITY = "notes";
+export const SYNC_ENTITY = "counter";
 
 export type AppDatabase = {
-  notes: Collection<Note, string>;
+  counter: Collection<Counter, string>;
   oplogOps: Collection<StoredOp, string>;
   oplogHeads: Collection<HeadRow, string>;
-  offline: OfflineExecutor;
   store: OpLogStore;
   engine: SyncEngine;
-  /** Raw wa-sqlite handle — integrity checks and SQL dump export. */
-  rawDb: {
-    execute: <TRow = unknown>(sql: string, params?: readonly unknown[]) => Promise<readonly TRow[]>;
-  };
+  entity: string;
+  /** Fold pending local ops into the state row (facade calls this after append). */
+  materializeLocal: () => Promise<Counter>;
   /** Preload collections + hydrate the op-log index, without starting sync. */
   prepareLocalOnly: () => Promise<void>;
-  /** Start subscriptions + genesis publish + first sync. */
+  /** Start subscriptions + first sync. */
   startSync: () => Promise<void>;
   pullRemote: () => Promise<void>;
   /** Rebuild the transport (post identity/pairing import). */
@@ -83,10 +78,10 @@ export async function openAppDatabase(): Promise<AppDatabase> {
     coordinator,
   });
 
-  const notes = createCollection(
-    persistedCollectionOptions<Note, string>({
-      id: "notes",
-      getKey: (note) => note.id,
+  const counter = createCollection(
+    persistedCollectionOptions<Counter, string>({
+      id: "counter",
+      getKey: (row) => row.id,
       persistence,
       schemaVersion: SCHEMA_VERSION,
     }),
@@ -117,13 +112,13 @@ export async function openAppDatabase(): Promise<AppDatabase> {
   });
 
   const target: MaterializeTarget = {
-    getNote: (id) => notes.get(id),
-    upsertNote: async (note) => {
-      await persistLocal(notes, () => {
-        if (notes.get(note.id)) {
-          notes.update(note.id, (draft) => Object.assign(draft, note));
+    getCounter: () => counter.get(COUNTER_ID),
+    upsertCounter: async (row) => {
+      await persistLocal(counter, () => {
+        if (counter.get(row.id)) {
+          counter.update(row.id, (draft) => Object.assign(draft, row));
         } else {
-          notes.insert(note);
+          counter.insert(row);
         }
       });
     },
@@ -136,46 +131,12 @@ export async function openAppDatabase(): Promise<AppDatabase> {
     entity: SYNC_ENTITY,
   });
 
-  const offline = startOfflineExecutor({
-    collections: { notes },
-    mutationFns: {
-      syncNotes: async ({ transaction }) => {
-        notes.utils.acceptMutations(transaction);
-
-        // Durably append each mutated row to this device's log first — the
-        // log IS the outbox (published flag), so the write survives a crash
-        // between append and publish. Then PUBLISH (await, not fire-and-
-        // forget): a push failure (offline, locked space) throws here and
-        // the offline-transactions executor retries the whole mutation
-        // later, exactly like the old push-then-pull cycle did. Pulling
-        // remote state stays a background concern — a slow/failed pull must
-        // never block or fail a local write.
-        for (const mutation of transaction.mutations) {
-          const raw = mutation.modified ?? mutation.original;
-          const note = parseNote(raw);
-          const payload: NoteOpPayload = { kind: "upsert", note };
-          await store.append(SYNC_ENTITY, payload);
-        }
-        await engine.flush();
-
-        void engine.syncNow().catch(() => undefined);
-      },
-    },
-  });
-
   /**
    * Load every collection into memory and populate the op-log read index,
    * WITHOUT starting sync. Idempotent.
-   *
-   * The corrupt-database path needs exactly this and nothing more: recovery
-   * still has to read notes (to export them) and append imported ones (which
-   * requires a hydrated head index, or `append` cannot find the op to chain
-   * onto and refuses to extend the log). Sync must stay off there — the DB
-   * failed its integrity check.
    */
   const prepareLocalOnly = async () => {
-    await offline.waitForInit();
-    await notes.preload();
+    await counter.preload();
     await oplogOps.preload();
     await oplogHeads.preload();
     store.hydrate([SYNC_ENTITY]);
@@ -186,16 +147,9 @@ export async function openAppDatabase(): Promise<AppDatabase> {
     // unapplied state. Normally already done by the caller (DbProvider);
     // repeated here so startSync is safe to call on its own.
     await prepareLocalOnly();
-
-    // v2→v3 upgrade / fresh-db genesis: local notes exist but this device's
-    // log is empty and no other device's log is known — republish local
-    // state as genesis upserts (convergent via LWW/Loro on every peer).
-    const ownHead = store.head(SYNC_ENTITY, device.deviceId);
-    if (!ownHead && store.heads(SYNC_ENTITY).length === 0 && notes.toArray.length > 0) {
-      for (const note of notes.toArray) {
-        await store.append(SYNC_ENTITY, { kind: "upsert", note } satisfies NoteOpPayload);
-      }
-    }
+    // Fold anything the last session appended but never materialized (a
+    // crash between append and fold), then run the first cycle.
+    await materializeCounterOps(store, target);
     await engine.syncNow().catch(() => undefined);
   };
 
@@ -207,13 +161,16 @@ export async function openAppDatabase(): Promise<AppDatabase> {
   }
 
   return {
-    notes,
+    counter,
     oplogOps,
     oplogHeads,
-    offline,
     store,
     engine,
-    rawDb: database,
+    entity: SYNC_ENTITY,
+    materializeLocal: async () => {
+      await materializeCounterOps(store, target);
+      return counter.get(COUNTER_ID) ?? emptyCounter();
+    },
     prepareLocalOnly,
     startSync,
     pullRemote: () => engine.syncNow(),
@@ -222,7 +179,6 @@ export async function openAppDatabase(): Promise<AppDatabase> {
       if (typeof window !== "undefined") {
         window.removeEventListener("online", onOnline);
       }
-      offline.dispose();
       await engine.close();
       coordinator.dispose();
       await database.close?.();

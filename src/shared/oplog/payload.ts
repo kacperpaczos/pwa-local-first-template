@@ -1,28 +1,34 @@
 import * as z from "zod/mini";
-import { MAX_LAMPORT, noteSchema } from "@/shared/db/schemas";
+import { MAX_COUNTER, MAX_LAMPORT } from "@/shared/db/schemas";
 
 /**
- * Op payloads carried by the per-device logs. Unlike the retired wire
- * protocol's decorative `op` field, `kind` here is authoritative — the
+ * Op payloads carried by the per-device logs. `kind` is authoritative — the
  * materializer switches on it.
  *
- * v0.1 ships FULL-STATE `upsert` payloads (whole Note row incl. the Loro
- * snapshot), not deltas: ops stay idempotent and order-tolerant at the
- * materializer, and `mergeNote` keeps doing per-field resolution.
- * Loro `export({mode:"update"})` deltas are a documented v0.2 optimization.
+ * Both payloads are DELTAS, not snapshots, and that is the point of the demo:
+ *
+ * - `increment` carries only the amount. Folding is addition, addition
+ *   commutes, so any interleaving of any devices' logs converges — the
+ *   classic grow-only counter, expressed as op-log materialization.
+ * - `set_label` carries the full new value plus a Lamport timestamp; folding
+ *   is last-writer-wins with a deterministic tie-break. Same op shape, very
+ *   different merge policy — which is exactly what the payload registry
+ *   exists to express per entity.
  */
-export const noteOpPayloadSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("upsert"), note: noteSchema }),
+export const counterOpPayloadSchema = z.discriminatedUnion("kind", [
   z.object({
-    kind: z.literal("delete"),
-    id: z.string(),
-    deleted_at: z.string(),
-    // Bounded like the note schema's counters — see MAX_LAMPORT.
-    deleted_lamport: z.number().check(z.int(), z.gte(0), z.lte(MAX_LAMPORT)),
+    kind: z.literal("increment"),
+    amount: z.number().check(z.int(), z.gte(1), z.lte(MAX_COUNTER)),
+  }),
+  z.object({
+    kind: z.literal("set_label"),
+    label: z.string(),
+    // Bounded like the schema's counters — see MAX_LAMPORT.
+    lamport: z.number().check(z.int(), z.gte(0), z.lte(MAX_LAMPORT)),
   }),
 ]);
 
-export type NoteOpPayload = z.infer<typeof noteOpPayloadSchema>;
+export type CounterOpPayload = z.infer<typeof counterOpPayloadSchema>;
 
 type OpPayloadSchema = { parse(data: unknown): unknown };
 
@@ -41,7 +47,7 @@ export function getOpPayloadSchema(entity: string): OpPayloadSchema | undefined 
   return registry.get(entity);
 }
 
-registerOpPayloadSchema("notes", noteOpPayloadSchema);
+registerOpPayloadSchema("counter", counterOpPayloadSchema);
 
 export function encodeOpPayload(payload: unknown): Uint8Array {
   return new TextEncoder().encode(JSON.stringify(payload));
@@ -56,6 +62,6 @@ export function decodeOpPayload(entity: string, bytes: Uint8Array): unknown {
   return schema.parse(JSON.parse(new TextDecoder().decode(bytes)));
 }
 
-export function decodeNoteOpPayload(bytes: Uint8Array): NoteOpPayload {
-  return noteOpPayloadSchema.parse(JSON.parse(new TextDecoder().decode(bytes)));
+export function decodeCounterOpPayload(bytes: Uint8Array): CounterOpPayload {
+  return counterOpPayloadSchema.parse(JSON.parse(new TextDecoder().decode(bytes)));
 }

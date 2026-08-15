@@ -19,9 +19,6 @@ export async function resetGunPeer(): Promise<void> {
   }
 }
 
-/** @deprecated Use resetGunPeer */
-export const resetRelay = resetGunPeer;
-
 export type TestSpace = {
   spaceId: string;
   spaceKeyB64: string;
@@ -64,40 +61,38 @@ async function injectIdentity(
   );
 }
 
-export async function waitForNotesReady(page: Page): Promise<void> {
-  await page.goto("/notes");
+export async function waitForCounterReady(page: Page): Promise<void> {
+  await page.goto("/");
   await expect(page.getByTestId("sync-status")).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByTestId("notes-empty").or(page.getByTestId("notes-list"))).toBeVisible({
-    timeout: 30_000,
-  });
+  await expect(page.getByTestId("counter-value")).toBeVisible({ timeout: 30_000 });
 }
 
-export function uniqueTitle(prefix: string): string {
-  return `${prefix} ${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+export async function readCounterValue(page: Page): Promise<number> {
+  const text = await page.getByTestId("counter-value").textContent();
+  return Number(text?.trim() ?? "NaN");
 }
 
-export async function createNote(page: Page, title: string, body = ""): Promise<void> {
-  await page.getByTestId("note-title").fill(title);
-  if (body) {
-    await page.getByTestId("note-body").fill(body);
+export async function clickIncrement(page: Page, times = 1): Promise<void> {
+  for (let i = 0; i < times; i++) {
+    await page.getByTestId("counter-increment").click();
   }
-  await page.getByTestId("note-submit").click();
 }
 
-export async function expectNoteVisible(
+export async function saveLabel(page: Page, label: string): Promise<void> {
+  await page.getByTestId("counter-label").fill(label);
+  await page.getByTestId("counter-label-save").click();
+}
+
+export async function expectCounterValue(
   page: Page,
-  title: string,
+  value: number,
   timeout = 15_000,
 ): Promise<void> {
-  await expect(page.getByTestId("note-item").filter({ hasText: title })).toHaveCount(1, {
-    timeout,
-  });
+  await expect(page.getByTestId("counter-value")).toHaveText(String(value), { timeout });
 }
 
-export async function expectNoteHidden(page: Page, title: string, timeout = 15_000): Promise<void> {
-  await expect(page.getByTestId("note-item").filter({ hasText: title })).toHaveCount(0, {
-    timeout,
-  });
+export async function expectLabel(page: Page, label: string, timeout = 15_000): Promise<void> {
+  await expect(page.getByTestId("counter-label")).toHaveValue(label, { timeout });
 }
 
 export async function syncNow(page: Page): Promise<void> {
@@ -120,8 +115,8 @@ export async function openTwoPeers(browser: Browser): Promise<{
   await injectIdentity(contextB, identity, space);
   const pageA = await contextA.newPage();
   const pageB = await contextB.newPage();
-  await waitForNotesReady(pageA);
-  await waitForNotesReady(pageB);
+  await waitForCounterReady(pageA);
+  await waitForCounterReady(pageB);
   return { contextA, contextB, pageA, pageB, identity, space };
 }
 
@@ -133,53 +128,19 @@ export async function openTwoTabs(browser: Browser): Promise<{
   const context = await browser.newContext();
   const tabA = await context.newPage();
   const tabB = await context.newPage();
-  await waitForNotesReady(tabA);
-  await waitForNotesReady(tabB);
+  await waitForCounterReady(tabA);
+  await waitForCounterReady(tabB);
   return { context, tabA, tabB };
 }
 
 type DbHarness = {
-  facade: {
-    createNote: (input: { title: string; body?: string }) => Promise<{ id: string; body: string }>;
-    updateNote: (
-      id: string,
-      input: { title?: string; body?: string },
-    ) => Promise<{ id: string; body: string }>;
-    softDeleteNote: (id: string) => Promise<{ id: string }>;
-  };
   db: {
-    notes: {
-      get: (id: string) => { id: string; body: string; title: string } | undefined;
-      toArray: Array<{ id: string; title: string; $synced?: boolean }>;
+    entity: string;
+    store: {
+      unpublished: (entity: string) => Array<{ hash: string }>;
     };
   };
 };
-
-/**
- * Polls the collection until this note's own sync cycle finished ($synced).
- * Needed before full page navigation: a reload's pullRemote() can otherwise
- * race a not-yet-pushed local write.
- */
-export async function waitForNoteSynced(
-  page: Page,
-  title: string,
-  timeout = 30_000,
-): Promise<string> {
-  await getDb(page);
-  return page.evaluate(
-    async ({ noteTitle, timeoutMs }) => {
-      const harness = (globalThis as unknown as { __db: DbHarness }).__db;
-      const deadline = Date.now() + timeoutMs;
-      while (Date.now() < deadline) {
-        const found = harness.db.notes.toArray.find((n) => n.title === noteTitle);
-        if (found?.$synced) return found.id;
-        await new Promise((resolve) => setTimeout(resolve, 100));
-      }
-      throw new Error(`Note never reached $synced=true: ${noteTitle}`);
-    },
-    { noteTitle: title, timeoutMs: timeout },
-  );
-}
 
 export async function getDb(page: Page): Promise<void> {
   await page.waitForFunction(() => Boolean((globalThis as { __db?: unknown }).__db), null, {
@@ -187,47 +148,24 @@ export async function getDb(page: Page): Promise<void> {
   });
 }
 
-export async function updateNoteBodyViaDb(
-  page: Page,
-  noteId: string,
-  body: string,
-): Promise<string> {
+/**
+ * Polls until every op this device appended has actually been published to
+ * the relay. Needed before asserting on another device (or reloading): the
+ * facade publishes in the background, so a click can be locally folded while
+ * its op is still queued in the log/outbox.
+ */
+export async function waitForPublished(page: Page, timeout = 30_000): Promise<void> {
   await getDb(page);
-  return page.evaluate(
-    async ({ id, nextBody }) => {
+  await page.evaluate(
+    async ({ timeoutMs }) => {
       const harness = (globalThis as unknown as { __db: DbHarness }).__db;
-      const updated = await harness.facade.updateNote(id, { body: nextBody });
-      return updated.body;
+      const deadline = Date.now() + timeoutMs;
+      while (Date.now() < deadline) {
+        if (harness.db.store.unpublished(harness.db.entity).length === 0) return;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      throw new Error("Ops never finished publishing");
     },
-    { id: noteId, nextBody: body },
+    { timeoutMs: timeout },
   );
-}
-
-export async function findNoteIdByTitle(page: Page, title: string): Promise<string> {
-  await getDb(page);
-  return page.evaluate((noteTitle) => {
-    const harness = (globalThis as unknown as { __db: DbHarness }).__db;
-    const notes = harness.db.notes as unknown as {
-      toArray?: Array<{ id: string; title: string }> | (() => Array<{ id: string; title: string }>);
-    };
-    const raw = notes.toArray;
-    const rows = typeof raw === "function" ? raw() : (raw ?? []);
-    const found = rows.find((n) => n.title === noteTitle);
-    if (!found) {
-      throw new Error(`Note not found in __db: ${noteTitle}`);
-    }
-    return found.id;
-  }, title);
-}
-
-export async function readNoteBodyViaDb(page: Page, noteId: string): Promise<string> {
-  await getDb(page);
-  return page.evaluate((id) => {
-    const harness = (globalThis as unknown as { __db: DbHarness }).__db;
-    const note = harness.db.notes.get(id);
-    if (!note) {
-      throw new Error(`Note missing: ${id}`);
-    }
-    return note.body;
-  }, noteId);
 }

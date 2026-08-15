@@ -1,6 +1,6 @@
 import type { Component } from "solid-js";
 import { useStore } from "@nanostores/solid";
-import { storagePersistStore } from "@/backup/status";
+import { storagePersistStore } from "@/shared/db/storage-persist";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 function persistLabel(status: ReturnType<typeof storagePersistStore.get>): string {
@@ -12,7 +12,7 @@ function persistLabel(status: ReturnType<typeof storagePersistStore.get>): strin
     case "unsupported":
       return "This browser does not support persistent storage — keep backups.";
     case "unknown":
-      return "Persistence status unknown (no notes saved yet).";
+      return "Persistence status unknown (nothing saved yet).";
   }
 }
 

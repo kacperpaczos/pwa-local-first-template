@@ -9,7 +9,6 @@ const BASE_URL = `http://127.0.0.1:${WEB_PORT}`;
 
 const e2eEnv = {
   VITE_GUN_PEERS: `http://127.0.0.1:${GUN_PORT}/gun`,
-  VITE_AI_ENABLED: "true",
   VITE_E2E: "1",
   GUN_PEER_TEST_MODE: "1",
   GUN_PEER_PORT: GUN_PORT,
@@ -34,14 +33,14 @@ export default defineConfig({
   projects: [
     {
       name: "chromium-smoke",
-      testMatch: /(?:smoke|ai)\.spec\.ts/,
+      testMatch: /smoke\.spec\.ts/,
       use: { ...devices["Desktop Chrome"] },
     },
     {
       // Runs after smoke so both projects never share the gun peer concurrently.
       name: "chromium-sync",
       dependencies: ["chromium-smoke"],
-      testMatch: /(?:offline-sync|multi-tab|gun-peers|merge-body|backup)\.spec\.ts/,
+      testMatch: /(?:offline-sync|multi-tab|gun-peers)\.spec\.ts/,
       fullyParallel: false,
       workers: 1,
       use: { ...devices["Desktop Chrome"] },

@@ -29,8 +29,8 @@ describe("conflict-log", () => {
   it("records and lists conflicts", () => {
     const entry = recordConflict(
       {
-        noteId: "n1",
-        field: "title",
+        entityId: "n1",
+        field: "label",
         lostValue: "local",
         lostLamport: 2,
         wonValue: "remote",
@@ -40,16 +40,16 @@ describe("conflict-log", () => {
     );
     expect(entry).not.toBeNull();
     expect(entry!.id).toBeTruthy();
-    expect(listConflicts({ noteId: "n1" }, storage)).toHaveLength(1);
-    expect(listConflicts({ noteId: "other" }, storage)).toHaveLength(0);
+    expect(listConflicts({ entityId: "n1" }, storage)).toHaveLength(1);
+    expect(listConflicts({ entityId: "other" }, storage)).toHaveLength(0);
   });
 
   it("returns null without storage (no localStorage)", () => {
     expect(
       recordConflict(
         {
-          noteId: "n1",
-          field: "title",
+          entityId: "n1",
+          field: "label",
           lostValue: "a",
           lostLamport: 1,
           wonValue: "b",
@@ -63,8 +63,8 @@ describe("conflict-log", () => {
     for (let i = 0; i < CONFLICT_LOG_MAX_ENTRIES + 25; i++) {
       recordConflict(
         {
-          noteId: "n",
-          field: "title",
+          entityId: "n",
+          field: "label",
           lostValue: `lost-${i}`,
           lostLamport: i,
           wonValue: `won-${i}`,
@@ -79,8 +79,8 @@ describe("conflict-log", () => {
   it("clears entries older than 30 days", () => {
     const old = {
       id: "old-id",
-      noteId: "old",
-      field: "deleted_at" as const,
+      entityId: "old",
+      field: "label" as const,
       lostValue: null,
       lostLamport: 1,
       wonValue: "2026-01-01T00:00:00.000Z",
@@ -88,8 +88,8 @@ describe("conflict-log", () => {
     };
     const fresh = {
       id: "fresh-id",
-      noteId: "fresh",
-      field: "title" as const,
+      entityId: "fresh",
+      field: "label" as const,
       lostValue: "a",
       lostLamport: 2,
       wonValue: "b",
@@ -103,7 +103,7 @@ describe("conflict-log", () => {
     expect(removed).toBe(1);
     const left = listConflicts({ now }, storage);
     expect(left).toHaveLength(1);
-    expect(left[0]!.noteId).toBe("fresh");
+    expect(left[0]!.entityId).toBe("fresh");
     expect(storage.getItem(CONFLICT_LOG_STORAGE_KEY)).toBeTruthy();
   });
 });

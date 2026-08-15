@@ -69,14 +69,14 @@ export default defineConfig({
             sizes: "1280x800",
             type: "image/png",
             form_factor: "wide",
-            label: "Home — local-first notes, AI, and settings",
+            label: "Counter — one shared local-first counter",
           },
           {
             src: "screenshots/notes-narrow.png",
             sizes: "390x844",
             type: "image/png",
             form_factor: "narrow",
-            label: "Notes — offline-first CRUD with sync status",
+            label: "Counter — offline-first with sync status",
           },
         ],
       },
@@ -110,7 +110,6 @@ export default defineConfig({
     }),
   ],
   optimizeDeps: {
-    exclude: ["loro-crdt", "@mlc-ai/web-llm"],
     include: [
       "gun",
       "gun/gun",

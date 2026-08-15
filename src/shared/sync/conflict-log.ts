@@ -4,11 +4,11 @@ export const CONFLICT_LOG_STORAGE_KEY = "pwa-conflict-log";
 export const CONFLICT_LOG_MAX_ENTRIES = 200;
 export const CONFLICT_LOG_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
-export type ConflictField = "title" | "deleted_at";
+export type ConflictField = "label";
 
 export type ConflictEntry = {
   id: string;
-  noteId: string;
+  entityId: string;
   field: ConflictField;
   lostValue: string | null;
   lostLamport: number;
@@ -17,7 +17,7 @@ export type ConflictEntry = {
 };
 
 export type RecordConflictInput = {
-  noteId: string;
+  entityId: string;
   field: ConflictField;
   lostValue: string | null;
   lostLamport: number;
@@ -50,9 +50,8 @@ function readAll(storage: Pick<Storage, "getItem">): ConflictEntry[] {
         !!row &&
         typeof row === "object" &&
         typeof (row as ConflictEntry).id === "string" &&
-        typeof (row as ConflictEntry).noteId === "string" &&
-        ((row as ConflictEntry).field === "title" ||
-          (row as ConflictEntry).field === "deleted_at") &&
+        typeof (row as ConflictEntry).entityId === "string" &&
+        (row as ConflictEntry).field === "label" &&
         typeof (row as ConflictEntry).lostLamport === "number" &&
         typeof (row as ConflictEntry).at === "string",
     );
@@ -87,7 +86,7 @@ export function recordConflict(
 
   const entry: ConflictEntry = {
     id: createEntityId(),
-    noteId: input.noteId,
+    entityId: input.entityId,
     field: input.field,
     lostValue: input.lostValue,
     lostLamport: input.lostLamport,
@@ -101,7 +100,7 @@ export function recordConflict(
 }
 
 export function listConflicts(
-  options: { noteId?: string; now?: number | Date } = {},
+  options: { entityId?: string; now?: number | Date } = {},
   storage: Pick<Storage, "getItem" | "setItem"> | undefined = defaultStorage(),
 ): ConflictEntry[] {
   if (!canUseStorage(storage) || !storage) return [];
@@ -116,8 +115,8 @@ export function listConflicts(
   if ("setItem" in storage && typeof storage.setItem === "function") {
     writeAll(entries, storage as Pick<Storage, "setItem">);
   }
-  if (options.noteId) {
-    entries = entries.filter((e) => e.noteId === options.noteId);
+  if (options.entityId) {
+    entries = entries.filter((e) => e.entityId === options.entityId);
   }
   return entries;
 }
@@ -136,9 +135,9 @@ export function clearOldConflicts(
   return before.length - after.length;
 }
 
-export function conflictsForNote(
-  noteId: string,
+export function conflictsForEntity(
+  entityId: string,
   storage?: Pick<Storage, "getItem" | "setItem">,
 ): ConflictEntry[] {
-  return listConflicts({ noteId }, storage);
+  return listConflicts({ entityId }, storage);
 }

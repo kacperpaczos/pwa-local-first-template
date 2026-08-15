@@ -9,11 +9,11 @@ const NotFoundPage: Component = () => {
       <p class="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">404</p>
       <h1 class="text-2xl font-semibold tracking-tight">Page not found</h1>
       <p class="text-sm text-muted-foreground">
-        There is nothing at this address. Your notes are safe — they live in this browser.
+        There is nothing at this address. Your data is safe — it lives in this browser.
       </p>
       <Button as={A} href="/" class="mt-2">
         <Home class="size-4" />
-        Back to home
+        Back to the counter
       </Button>
     </div>
   );
