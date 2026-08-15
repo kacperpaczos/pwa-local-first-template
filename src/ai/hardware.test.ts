@@ -1,10 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  detectHardware,
-  recommendTier,
-  resolveAiTier,
-  type HardwareProfile,
-} from "./hardware";
+import { detectHardware, recommendTier, resolveAiTier, type HardwareProfile } from "./hardware";
 import { AI_TIER_STORAGE_KEY, setPersistedAiTier } from "./config";
 
 function memoryStorage() {

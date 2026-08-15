@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest";
 import type { Note } from "../shared/db/schemas";
 import { createBodyDoc } from "../shared/db/crdt";
 import { createEntityId } from "../shared/db/ids";
-import { BACKUP_FORMAT_VERSION, backupSchema, exportNotesAsBackup, serializeBackup } from "./export";
+import {
+  BACKUP_FORMAT_VERSION,
+  backupSchema,
+  exportNotesAsBackup,
+  serializeBackup,
+} from "./export";
 
 function makeNote(partial: Partial<Note> = {}): Note {
   const body = createBodyDoc(partial.body ?? "body");

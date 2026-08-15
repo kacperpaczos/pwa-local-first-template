@@ -1,8 +1,8 @@
 {
   "name": "pwa-local-first-template",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
-  "description": "Solid.js local-first PWA template (TanStack DB + outbox + Gun sync)",
+  "description": "Solid.js local-first PWA template (TanStack DB + outbox + per-device op-log sync)",
   "type": "module",
   "scripts": {
     "dev": "concurrently -k -n gun,app -c blue,green \"pnpm dev:gun-peer\" \"pnpm dev:app\"",
@@ -12,19 +12,26 @@
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "lint:fix": "biome check . --write",
     "test": "vitest run",
-    "test:unit": "vitest run",
+    "test:unit": "vitest run --project=unit",
+    "test:contract": "vitest run --project=contract",
+    "test:integration": "vitest run --project=integration",
+    "test:dom": "vitest run --project=dom",
     "test:watch": "vitest",
-    "test:e2e": "playwright test",
-    "test:e2e:sync": "playwright test --project=chromium-sync",
+    "test:e2e": "node scripts/e2e.mjs",
+    "test:e2e:sync": "node scripts/e2e.mjs --project=chromium-sync",
     "test:e2e:install": "playwright install chromium",
-    "test:all": "pnpm test:unit && pnpm test:e2e"
+    "test:all": "pnpm test && pnpm test:e2e",
+    "check:no-e2e-hooks": "node scripts/check-no-e2e-hooks.mjs"
   },
   "license": "MIT",
   "dependencies": {
     "@kobalte/core": "^0.13.12",
     "@mlc-ai/web-llm": "^0.2.84",
     "@nanostores/solid": "^1.1.1",
+    "@noble/curves": "^2.3.0",
     "@noble/hashes": "^2.2.0",
     "@scure/bip39": "^2.2.0",
     "@solidjs/router": "^1.0.0",
@@ -48,7 +55,10 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.5.7",
     "@playwright/test": "^1.62.1",
+    "@solidjs/testing-library": "^0.8.10",
+    "@testing-library/jest-dom": "^7.0.0",
     "@types/node": "^26.1.2",
     "@types/qrcode": "^1.5.6",
     "@vitest/coverage-v8": "^4.1.10",

@@ -23,10 +23,10 @@ export const storagePersistStore = atom<StoragePersistStatus>("unknown");
 let persistRequested = false;
 
 /**
- * Requests durable storage once per session, on the first note write (plan
- * §Etap 4.0). Subsequent calls are no-ops — the browser's own answer to
- * `persist()` doesn't change within a session, so there's nothing to gain
- * from asking again on every write.
+ * Requests durable storage once per session, on the first note write.
+ * Subsequent calls are no-ops — the browser's own answer to `persist()`
+ * doesn't change within a session, so there's nothing to gain from asking
+ * again on every write.
  */
 export async function ensureStoragePersisted(): Promise<void> {
   if (persistRequested) return;

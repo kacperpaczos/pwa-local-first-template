@@ -3,13 +3,7 @@ import { A } from "@solidjs/router";
 import { Bot, NotebookPen, Settings } from "lucide-solid";
 import { appName } from "@/shared/lib";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 const HomePage: Component = () => {
   return (
@@ -20,8 +14,8 @@ const HomePage: Component = () => {
         </p>
         <h1 class="text-3xl font-semibold tracking-tight sm:text-4xl md:text-5xl">{appName}</h1>
         <p class="max-w-xl text-sm text-muted-foreground sm:text-base">
-          Solid.js, Vite, TanStack DB (SQLite/OPFS) and outbox — ready for sync. On-device AI lives on
-          its own page so model memory does not fight note storage.
+          Solid.js, Vite, TanStack DB (SQLite/OPFS) and outbox — ready for sync. On-device AI lives
+          on its own page so model memory does not fight note storage.
         </p>
         <div class="flex flex-col gap-2 pt-1 sm:flex-row">
           <Button as={A} href="/notes" class="w-full sm:w-auto">

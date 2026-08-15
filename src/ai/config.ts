@@ -1,10 +1,11 @@
 /**
- * Master switch for the whole AI layer. Off by default in any build where
- * VITE_AI_ENABLED is explicitly "false" — everything else in `ai/` degrades
+ * Master switch for the whole AI layer — opt-in: only builds with
+ * VITE_AI_ENABLED="true" ship with AI on. Everything else in `ai/` degrades
  * to `unavailable` when this is false, so the rest of the app never has to
- * know AI exists.
+ * know AI exists. The WebLLM chunks are behind dynamic imports either way,
+ * so a disabled build never fetches them.
  */
-export const aiFeatureEnabled: boolean = import.meta.env.VITE_AI_ENABLED !== "false";
+export const aiFeatureEnabled: boolean = import.meta.env.VITE_AI_ENABLED === "true";
 
 /** Hardware / quality tiers for on-device WebLLM. */
 export type AiTier = "max" | "std" | "dev";

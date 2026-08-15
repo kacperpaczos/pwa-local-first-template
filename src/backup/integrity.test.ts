@@ -14,10 +14,7 @@ describe("checkDatabaseIntegrity", () => {
 
   it("is false when multiple problem rows come back", async () => {
     const db = {
-      execute: async () => [
-        { integrity_check: "problem 1" },
-        { integrity_check: "problem 2" },
-      ],
+      execute: async () => [{ integrity_check: "problem 1" }, { integrity_check: "problem 2" }],
     };
     expect(await checkDatabaseIntegrity(db)).toBe(false);
   });

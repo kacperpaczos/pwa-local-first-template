@@ -14,19 +14,10 @@ export type SpaceRecord = {
 };
 
 function newSpaceId(): string {
-  if (typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID();
-  }
-  const bytes = crypto.getRandomValues(new Uint8Array(16));
-  bytes[6] = (bytes[6]! & 0x0f) | 0x40;
-  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
-  const hex = [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  return crypto.randomUUID();
 }
 
-export function loadSpaceId(
-  storage: Pick<Storage, "getItem"> = localStorage,
-): string | null {
+export function loadSpaceId(storage: Pick<Storage, "getItem"> = localStorage): string | null {
   return storage.getItem(SPACE_ID_STORAGE_KEY);
 }
 
@@ -41,9 +32,7 @@ export async function ensureSpace(
   }
 
   const spaceId = existingId ?? newSpaceId();
-  const key = existingKey
-    ? await importSpaceKey(existingKey)
-    : await generateSpaceKey();
+  const key = existingKey ? await importSpaceKey(existingKey) : await generateSpaceKey();
   const exported = existingKey ?? (await exportSpaceKey(key));
 
   storage.setItem(SPACE_ID_STORAGE_KEY, spaceId);
@@ -80,9 +69,7 @@ export function saveSpaceExported(
   storage.setItem(SPACE_KEY_STORAGE_KEY, spaceKeyB64);
 }
 
-export function clearSpace(
-  storage: Pick<Storage, "removeItem"> = localStorage,
-): void {
+export function clearSpace(storage: Pick<Storage, "removeItem"> = localStorage): void {
   storage.removeItem(SPACE_ID_STORAGE_KEY);
   storage.removeItem(SPACE_KEY_STORAGE_KEY);
 }

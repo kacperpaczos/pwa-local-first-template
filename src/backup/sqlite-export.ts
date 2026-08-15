@@ -1,4 +1,5 @@
 import type { AppDatabase } from "@/shared/db/client";
+import { triggerDownload } from "@/shared/lib/download";
 
 /**
  * Best-effort binary/SQL export of the local OPFS SQLite database.
@@ -31,9 +32,7 @@ export async function exportDatabaseAsSql(db: AppDatabase): Promise<string> {
       lines.push(`${createSql};`);
     }
 
-    const rows = await db.rawDb.execute<Record<string, unknown>>(
-      `SELECT * FROM "${name}"`,
-    );
+    const rows = await db.rawDb.execute<Record<string, unknown>>(`SELECT * FROM "${name}"`);
     for (const row of rows) {
       const cols = Object.keys(row);
       if (cols.length === 0) continue;
@@ -53,6 +52,10 @@ function sqlLiteral(value: unknown): string {
   if (typeof value === "number" && Number.isFinite(value)) return String(value);
   if (typeof value === "bigint") return String(value);
   if (typeof value === "boolean") return value ? "1" : "0";
+  if (value instanceof Uint8Array) {
+    const hex = [...value].map((b) => b.toString(16).padStart(2, "0")).join("");
+    return `X'${hex}'`;
+  }
   const text = typeof value === "string" ? value : JSON.stringify(value);
   return `'${text.replace(/'/g, "''")}'`;
 }
@@ -62,17 +65,5 @@ export function sqliteDumpFileName(at: Date = new Date()): string {
 }
 
 export function downloadSqlDump(sql: string, at: Date = new Date()): void {
-  if (typeof document === "undefined") {
-    throw new Error("downloadSqlDump requires a browser environment");
-  }
-  const blob = new Blob([sql], { type: "application/sql" });
-  const url = URL.createObjectURL(blob);
-  try {
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = sqliteDumpFileName(at);
-    anchor.click();
-  } finally {
-    URL.revokeObjectURL(url);
-  }
+  triggerDownload(sql, sqliteDumpFileName(at), "application/sql");
 }

@@ -3,9 +3,7 @@ import { createNote, uniqueTitle, waitForNotesReady } from "./helpers";
 
 test("home redirects user toward notes", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByRole("heading", { level: 1 })).toContainText(
-    "pwa-local-first-template",
-  );
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("pwa-local-first-template");
   await page.getByRole("link", { name: "Open notes" }).click();
   await expect(page).toHaveURL(/\/notes$/);
 });

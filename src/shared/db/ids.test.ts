@@ -3,7 +3,6 @@ import { createEntityId, isEntityId } from "./ids";
 import { nextLamport, peekLamport, resetLamportForTests } from "./lamport";
 import { parseCreateNoteInput, parseNote } from "./schemas";
 import { createBodyDoc } from "./crdt";
-import { parseSyncMutation } from "../sync/protocol";
 
 describe("createEntityId", () => {
   it("returns UUIDv7-shaped ids", () => {
@@ -34,7 +33,7 @@ describe("schemas", () => {
     expect(() => parseCreateNoteInput({ title: "" })).toThrow();
   });
 
-  it("parses note and sync mutation message", () => {
+  it("parses note", () => {
     const body = createBodyDoc("");
     const note = parseNote({
       id: createEntityId(),
@@ -47,13 +46,5 @@ describe("schemas", () => {
       deleted_lamport: 0,
     });
     expect(note.deleted_at).toBeNull();
-
-    const message = parseSyncMutation({
-      idempotencyKey: "k1",
-      entity: "notes",
-      op: "upsert",
-      payload: note,
-    });
-    expect(message.op).toBe("upsert");
   });
 });

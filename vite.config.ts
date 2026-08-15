@@ -21,8 +21,8 @@ export default defineConfig({
     solidPlugin(),
     moduleExclude("text-encoding"),
     VitePWA({
-      registerType: "autoUpdate",
-      includeAssets: ["favicon.svg"],
+      registerType: "prompt",
+      includeAssets: ["favicon.svg", "apple-touch-icon.png"],
       manifest: {
         name: "pwa-local-first-template",
         short_name: "local-first",
@@ -36,7 +36,47 @@ export default defineConfig({
             src: "favicon.svg",
             sizes: "any",
             type: "image/svg+xml",
-            purpose: "any maskable",
+            purpose: "any",
+          },
+          {
+            src: "pwa-192.png",
+            sizes: "192x192",
+            type: "image/png",
+            purpose: "any",
+          },
+          {
+            src: "pwa-512.png",
+            sizes: "512x512",
+            type: "image/png",
+            purpose: "any",
+          },
+          {
+            src: "maskable-192.png",
+            sizes: "192x192",
+            type: "image/png",
+            purpose: "maskable",
+          },
+          {
+            src: "maskable-512.png",
+            sizes: "512x512",
+            type: "image/png",
+            purpose: "maskable",
+          },
+        ],
+        screenshots: [
+          {
+            src: "screenshots/home-wide.png",
+            sizes: "1280x800",
+            type: "image/png",
+            form_factor: "wide",
+            label: "Home — local-first notes, AI, and settings",
+          },
+          {
+            src: "screenshots/notes-narrow.png",
+            sizes: "390x844",
+            type: "image/png",
+            form_factor: "narrow",
+            label: "Notes — offline-first CRUD with sync status",
           },
         ],
       },
@@ -49,8 +89,7 @@ export default defineConfig({
         runtimeCaching: [
           {
             urlPattern: ({ request }) =>
-              request.destination === "worker" ||
-              request.url.includes(".wasm"),
+              request.destination === "worker" || request.url.includes(".wasm"),
             handler: "CacheFirst",
             options: {
               cacheName: "wasm-and-workers",

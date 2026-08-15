@@ -1,7 +1,7 @@
 import { atom } from "nanostores";
 
 /**
- * State machine for the AI layer (Faza 3 plan, §4):
+ * State machine for the AI layer:
  *
  *   unavailable → available → downloading(p%) → ready → busy
  *                                  ├─ error → available (retry)

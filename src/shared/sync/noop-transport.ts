@@ -1,25 +1,45 @@
 import type {
-  Conflict,
-  PullResult,
-  PushResult,
-  SyncMutation,
-  SyncTransport,
+  FetchResult,
+  HeadAnnouncement,
+  LogSyncTransport,
+  PublishableOp,
+  PublishResult,
+  Unsubscribe,
 } from "./transport";
 
-/** Local-only transport — accepts everything, returns empty pulls. */
-export class NoopSyncTransport implements SyncTransport {
-  async push(outbox: readonly SyncMutation[]): Promise<PushResult> {
-    return {
-      accepted: outbox.map((m) => m.idempotencyKey),
-      rejected: [],
-    };
+/**
+ * Local-only transport (no peers configured) — observes nothing and,
+ * critically, reports that it published nothing. Ops stay queued in the log
+ * so that configuring a relay later ships the full history instead of
+ * announcing a head above a hole every peer would see as an eternal gap.
+ */
+export class NoopLogTransport implements LogSyncTransport {
+  async ready(): Promise<void> {}
+
+  async publish(_entity: string, _ops: readonly PublishableOp[]): Promise<PublishResult> {
+    return { publishedHashes: [] };
   }
 
-  async pull(_cursor: string | null): Promise<PullResult> {
-    return { cursor: null, mutations: [] };
+  async publishAcks(
+    _entity: string,
+    _device: string,
+    _acks: Record<string, number>,
+  ): Promise<void> {}
+
+  subscribeHeads(_entity: string, _cb: (head: HeadAnnouncement) => void): Unsubscribe {
+    return () => {};
   }
 
-  async resolve(_conflicts: readonly Conflict[]): Promise<void> {
-    // No conflicts in noop mode.
+  subscribeAcks(
+    _entity: string,
+    _cb: (device: string, acks: Record<string, number>) => void,
+  ): Unsubscribe {
+    return () => {};
   }
+
+  async fetchOps(): Promise<FetchResult> {
+    return { ops: [], sawUnsupportedVersion: false };
+  }
+
+  async close(): Promise<void> {}
 }

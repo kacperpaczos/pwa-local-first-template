@@ -11,10 +11,12 @@ export type GcTombstonesOptions = {
   /** Age threshold for hard-deleting soft-deleted notes. Default: {@link TOMBSTONE_RETENTION_MS}. */
   retentionMs?: number;
   /**
-   * Optional coverage gate: when set, only hard-delete tombstones whose
-   * `deleted_lamport` is ≤ this value (caller’s sync-covered sequence / clock).
+   * Real coverage gate: hard-delete only tombstones every other device has
+   * seen (SyncEngine.isOpCovered over the ack maps). Without it, a tombstone
+   * GC'd before reaching a peer resurrects when that peer later syncs its
+   * pre-delete copy — the retention window is then the only backstop.
    */
-  coveredSeq?: number;
+  isCovered?: (note: Note) => boolean;
 };
 
 function toEpochMs(now: number | string | Date | undefined): number {
@@ -37,13 +39,12 @@ export async function gcTombstones(
   const nowMs = toEpochMs(options.now);
   const retentionMs = options.retentionMs ?? TOMBSTONE_RETENTION_MS;
   const cutoff = nowMs - retentionMs;
-  const coveredSeq = options.coveredSeq;
 
   const doomed = notes.toArray.filter((note) => {
     if (note.deleted_at == null) return false;
     const deletedMs = Date.parse(note.deleted_at);
     if (!Number.isFinite(deletedMs) || deletedMs > cutoff) return false;
-    if (coveredSeq !== undefined && note.deleted_lamport > coveredSeq) return false;
+    if (options.isCovered && !options.isCovered(note)) return false;
     return true;
   });
 

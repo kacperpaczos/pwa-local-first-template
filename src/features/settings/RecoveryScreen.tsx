@@ -4,13 +4,7 @@ import { downloadBackupFile, exportNotesAsBackup } from "@/backup/export";
 import { importBackup, parseBackupFile } from "@/backup/import";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 type Props = {
   db: AppDatabase;
@@ -18,8 +12,8 @@ type Props = {
 
 /**
  * Shown instead of a white screen when `PRAGMA integrity_check` fails at
- * startup (Etap 4.0). Offers the two ways out: export whatever rows are
- * still readable, or restore from a previously downloaded backup file.
+ * startup. Offers the two ways out: export whatever rows are still
+ * readable, or restore from a previously downloaded backup file.
  */
 const RecoveryScreen: Component<Props> = (props) => {
   const [status, setStatus] = createSignal<string | null>(null);
@@ -48,14 +42,8 @@ const RecoveryScreen: Component<Props> = (props) => {
     try {
       const raw = await file.text();
       const backup = parseBackupFile(raw);
-      const summary = await importBackup(
-        { notes: props.db.notes, syncMeta: props.db.syncMeta },
-        props.db.syncMutex,
-        backup,
-      );
-      setStatus(
-        `Imported ${summary.applied}/${summary.totalInBackup} notes. Refresh the page.`,
-      );
+      const summary = await importBackup({ notes: props.db.notes, store: props.db.store }, backup);
+      setStatus(`Imported ${summary.applied}/${summary.totalInBackup} notes. Refresh the page.`);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
     } finally {

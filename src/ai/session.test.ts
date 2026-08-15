@@ -9,11 +9,7 @@ import {
   touchAiActivity,
   unloadAiModel,
 } from "./session";
-import {
-  aiStatusStore,
-  setAiAvailable,
-  setAiUnavailable,
-} from "./status";
+import { aiStatusStore, setAiAvailable, setAiUnavailable } from "./status";
 import type { AiProvider } from "./types";
 
 function mockProvider(options?: {
@@ -95,8 +91,7 @@ describe("AI session download + inference", () => {
   });
 
   it("summarizeWithAi streams chunks and returns busy→ready", async () => {
-    globalThis.__createAiProvider = () =>
-      mockProvider({ chunks: ["Ala", " ma ", "kota"] });
+    globalThis.__createAiProvider = () => mockProvider({ chunks: ["Ala", " ma ", "kota"] });
     await downloadAiModel();
 
     const chunks: string[] = [];
@@ -126,8 +121,7 @@ describe("AI session download + inference", () => {
   });
 
   it("suggestMetaWithAi rejects invalid meta and records error", async () => {
-    globalThis.__createAiProvider = () =>
-      mockProvider({ invalidMeta: { title: "", tags: [] } });
+    globalThis.__createAiProvider = () => mockProvider({ invalidMeta: { title: "", tags: [] } });
     await downloadAiModel();
 
     await expect(suggestMetaWithAi("x")).rejects.toThrow();
@@ -167,6 +161,7 @@ describe("AI session download + inference", () => {
 
     globalThis.__createAiProvider = () => ({
       ...mockProvider(),
+      // biome-ignore lint/correctness/useYield: mock stream that fails before yielding
       summarize: async function* () {
         throw new Error("boom");
       },
@@ -175,6 +170,7 @@ describe("AI session download + inference", () => {
     await unloadAiModel();
     globalThis.__createAiProvider = () => ({
       ...mockProvider(),
+      // biome-ignore lint/correctness/useYield: mock stream that fails before yielding
       summarize: async function* () {
         throw new Error("boom");
       },
@@ -217,6 +213,35 @@ describe("AI session download + inference", () => {
     globalThis.__createAiProvider = () => provider;
     await downloadAiModel();
     expect(chatCalls).toBeGreaterThan(0);
+  });
+
+  it("unloadAiModel refuses to unload while a generation is in progress", async () => {
+    let resolveChunk: (() => void) | undefined;
+    globalThis.__createAiProvider = () => ({
+      ...mockProvider(),
+      summarize: async function* () {
+        yield "partial";
+        await new Promise<void>((resolve) => {
+          resolveChunk = resolve;
+        });
+        yield " done";
+      },
+    });
+    await downloadAiModel();
+
+    const summarizePromise = summarizeWithAi("note");
+    await vi.waitFor(() => expect(aiStatusStore.get().kind).toBe("busy"));
+
+    await expect(unloadAiModel()).rejects.toThrow(/generation is in progress/);
+    // Refusing to unload must not have torn anything down.
+    expect(aiStatusStore.get().kind).toBe("busy");
+
+    resolveChunk?.();
+    await summarizePromise;
+    expect(aiStatusStore.get()).toEqual({ kind: "ready" });
+
+    // Once idle again, unload works normally.
+    await expect(unloadAiModel()).resolves.toBeUndefined();
   });
 });
 
@@ -271,8 +296,6 @@ describe("shouldUseAiHarness", () => {
 
   it("blocks production builds", async () => {
     const { shouldUseAiHarness } = await import("./session");
-    expect(shouldUseAiHarness({ DEV: false, MODE: "production", VITE_E2E: undefined })).toBe(
-      false,
-    );
+    expect(shouldUseAiHarness({ DEV: false, MODE: "production", VITE_E2E: undefined })).toBe(false);
   });
 });

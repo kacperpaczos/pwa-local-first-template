@@ -13,10 +13,7 @@ type PageHeaderProps = ParentProps<{
 const PageHeader: Component<PageHeaderProps> = (props) => {
   return (
     <div
-      class={cn(
-        "flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between",
-        props.class,
-      )}
+      class={cn("flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between", props.class)}
     >
       <div class="min-w-0 space-y-1">
         <h1 class="text-2xl font-semibold tracking-tight sm:text-3xl">{props.title}</h1>

@@ -11,7 +11,7 @@ describe("runAgentTurn", () => {
       pendingWrite: {
         tool: "create_note",
         args: { title: "Hello", body: "world" },
-        summary: 'Create note “Hello”',
+        summary: "Create note “Hello”",
       },
     });
   });

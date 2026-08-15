@@ -1,13 +1,16 @@
 import { expect, type Browser, type BrowserContext, type Page } from "@playwright/test";
 import SEA from "gun/sea.js";
 import { exportSpaceKey, generateSpaceKey } from "../src/shared/crypto/envelope";
+import { SPACE_ID_STORAGE_KEY, SPACE_KEY_STORAGE_KEY } from "../src/shared/identity/space";
 import {
-  SPACE_ID_STORAGE_KEY,
-  SPACE_KEY_STORAGE_KEY,
-} from "../src/shared/identity/space";
-import { IDENTITY_STORAGE_KEY, type IdentityPayload, type SeaPair } from "../src/shared/identity/types";
+  IDENTITY_STORAGE_KEY,
+  type IdentityPayload,
+  type SeaPair,
+} from "../src/shared/identity/types";
 
-export const GUN_PEER_CTRL = "http://127.0.0.1:8765";
+// Port comes from the Playwright config (via scripts/e2e.mjs); 8765 is the
+// documented default when the suite is run without the wrapper.
+export const GUN_PEER_CTRL = `http://127.0.0.1:${process.env.GUN_PEER_PORT ?? "8765"}`;
 
 export async function resetGunPeer(): Promise<void> {
   const res = await fetch(`${GUN_PEER_CTRL}/test/reset`, { method: "POST" });
@@ -81,7 +84,11 @@ export async function createNote(page: Page, title: string, body = ""): Promise<
   await page.getByTestId("note-submit").click();
 }
 
-export async function expectNoteVisible(page: Page, title: string, timeout = 15_000): Promise<void> {
+export async function expectNoteVisible(
+  page: Page,
+  title: string,
+  timeout = 15_000,
+): Promise<void> {
   await expect(page.getByTestId("note-item").filter({ hasText: title })).toHaveCount(1, {
     timeout,
   });
@@ -180,7 +187,11 @@ export async function getDb(page: Page): Promise<void> {
   });
 }
 
-export async function updateNoteBodyViaDb(page: Page, noteId: string, body: string): Promise<string> {
+export async function updateNoteBodyViaDb(
+  page: Page,
+  noteId: string,
+  body: string,
+): Promise<string> {
   await getDb(page);
   return page.evaluate(
     async ({ id, nextBody }) => {

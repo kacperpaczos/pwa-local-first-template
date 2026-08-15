@@ -3,9 +3,9 @@ import { createNote, uniqueTitle, waitForNotesReady } from "./helpers";
 
 async function waitForAiPage(page: import("@playwright/test").Page): Promise<void> {
   await page.goto("/ai");
-  await expect(
-    page.getByTestId("ai-panel").or(page.getByTestId("ai-unavailable")),
-  ).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("ai-panel").or(page.getByTestId("ai-unavailable"))).toBeVisible({
+    timeout: 30_000,
+  });
 }
 
 test("without navigator.gpu, notes work and AI stays unavailable", async ({ page }) => {
