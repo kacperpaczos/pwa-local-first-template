@@ -6,13 +6,19 @@ const alias = {
   "@": fileURLToPath(new URL("./src", import.meta.url)),
 };
 
+/**
+ * One project per test layer — see "Test layers" in docs/architecture.md.
+ * The layer decides what is real and what is a stand-in, so it is expressed
+ * as a project (own name, own command) rather than a file-naming convention.
+ */
 export default defineConfig({
   test: {
     coverage: {
       provider: "v8",
       reporter: ["text-summary", "json-summary"],
       include: ["src/**", "server/**"],
-      exclude: ["src/components/ui/**", "src/**/*.test.*", "e2e/**"],
+      // src/testing/** is the test harness, not product code.
+      exclude: ["src/components/ui/**", "src/**/*.test.*", "src/testing/**", "e2e/**"],
     },
     projects: [
       {
@@ -21,6 +27,17 @@ export default defineConfig({
           name: "unit",
           environment: "node",
           include: ["src/**/*.{test,spec}.ts", "server/**/*.{test,spec}.ts"],
+          // The layered projects below own these; without the exclude, `unit`
+          // would run them a second time.
+          exclude: ["src/**/*.contract.test.ts"],
+        },
+      },
+      {
+        resolve: { alias },
+        test: {
+          name: "contract",
+          environment: "node",
+          include: ["src/**/*.contract.test.ts"],
         },
       },
       {
