@@ -66,19 +66,12 @@ history. Maps to `p2panda-encryption` / `p2panda-spaces`.
 ### 4. `[ours]` Acks are session state only
 
 `shared/sync/engine.ts` — `acksByDevice` lives in memory and is rebuilt from
-Gun subscriptions on every boot. The GC coverage gate compensates by treating
-an unacked-but-known peer as *not* covering (conservative, correct), and the
-startup GC pass is chained after the first sync cycle so acks have a chance to
-arrive. But an automatic GC pass right after boot on a flaky network will
-still usually skip.
-
-Persisting acks (a third small collection, or a column on `oplog_heads`) would
-make GC deterministic across reloads. Deferred from v0.1 to avoid another
-schema version for a best-effort background job.
-
-The *gate* itself is now covered against real acks across three devices
-(`gc-coverage.integration.test.ts`), so a regression in coverage logic fails
-fast. Persisting acks across reloads remains open.
+Gun subscriptions on every boot. Since [ADR-012](adr/012-counter-hello-world.md)
+nothing is deleted, so the tombstone-GC consumer of this gate is gone — but
+`isOpCovered`/the roster remain (device roster display, and any future
+pruning needs exactly this signal). Persisting acks (a third small
+collection, or a column on `oplog_heads`) would make coverage deterministic
+across reloads; do it when pruning returns (which maps to `p2panda-store`).
 
 ### 5. `[ours]` Corrupt device key silently mints a new identity
 
@@ -90,12 +83,12 @@ entry that can never be removed.
 
 Decide: surface it to the user, or accept and document it. Currently neither.
 
-### 6. `[ours]` `pending` delete ops are rescanned forever
+### 6. ~~`pending` delete ops are rescanned forever~~
 
-`shared/store/materialize.ts` — a `delete` op whose target note has never been
-seen stays unapplied and is re-planned on every cycle. Harmless (the plan is
-pure and cheap, nothing blocks behind it) but unbounded if the creating
-device never shows up. Consider aging them into quarantine after N cycles.
+**Moot since [ADR-012](adr/012-counter-hello-world.md)** — the counter domain
+has no deletes and the materializer recomputes instead of planning per-op
+folds. Re-opens only if a future domain reintroduces cross-op dependencies
+("delete X" before "create X" arrived).
 
 ### 7. `[ours]` No way to release a quarantined op
 
@@ -116,11 +109,11 @@ ingest. Commented in place; must be handled with the next protocol bump.
 ### 9. `[ours]` Entity-agnosticism is one step short
 
 The wire protocol, payload registry, and store are entity-parameterized, but
-`client.ts` hydrates and materializes only `"notes"`
-(`store.hydrate([SYNC_ENTITY])`, `materializeNoteOps`). Adding a second entity
-needs a materializer registry and a hydrate list, not a protocol change. Worth
-doing when a second entity actually exists — that is the test of whether the
-generalization holds.
+`client.ts` hydrates and materializes only `"counter"`
+(`store.hydrate([SYNC_ENTITY])`, `materializeCounterOps`). Adding a second
+entity needs a materializer registry and a hydrate list, not a protocol
+change. Worth doing when a second entity actually exists — that is the test
+of whether the generalization holds.
 
 ### 10. `[ours]` Gun `.once()` range-fetch reliability
 
@@ -182,13 +175,10 @@ per-flag sets) when the log gets large enough to matter.
 
 ### 13. `[frozen — p2panda]` No log compaction
 
-Full-state `upsert` payloads mean log size grows with edit count, not content
-size. No pruning ships in v0.1. Two directions, both v0.2: Loro delta payloads
-(`export({mode:"update"})`, needs causal-gap handling at the materializer) and
-real compaction (maps to `p2panda-store` pruning).
-
-Cheap mitigation available now: debounce/coalesce rapid edits in the facade so
-a burst of keystrokes is one op, not twenty.
+Log size grows with the lifetime op count (every click is an op) and nothing
+prunes. Real compaction maps to `p2panda-store` pruning. Cheap mitigation
+available now: debounce/coalesce rapid clicks in the facade so a burst is one
+`increment` op with a larger amount, not twenty ops.
 
 ---
 
@@ -203,8 +193,8 @@ otherwise coverage only ever ratchets down.
 ### 15. `[ours]` Thin component test coverage
 
 Three `.tsx` test files (InstallAppButton, AppErrorBoundary, PairingSection
-error path). The jsdom project exists and works — the extracted Settings
-sections and AI panels are now easy to test and untested.
+error path). The jsdom project exists and works — CounterPage and the
+Settings sections are easy to test and untested.
 
 ### 16. `[ours]` Missing CI gates
 

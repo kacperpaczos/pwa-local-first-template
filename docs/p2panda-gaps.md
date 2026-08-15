@@ -106,9 +106,10 @@ Design input for a future wasm client API, from things that actually bit us:
    no revocation, no forward secrecy — documented, not hidden) → groups via
    `p2panda-auth` / `p2panda-encryption`. We deliberately did **not** build
    a bespoke ACL system so this swap arrives unencumbered.
-4. **Payload deltas**: we ship full-state payloads (idempotent,
-   order-tolerant); moving to CRDT deltas (Loro update mode) is a planned
-   optimization that needs causal-gap handling in the materializer.
+4. **Materialization model**: our payloads are deltas and state is a full
+   recompute from the op set (order-free, idempotent). Adopting a stream-
+   consumer API is a natural fit; richer CRDT payloads (collaborative text)
+   would return as a document-delta op kind.
 
 ## 5. What we offer
 

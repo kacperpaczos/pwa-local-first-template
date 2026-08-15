@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### Changed — the demo domain is now a hello-world counter (ADR-012)
+
+- **Notes, AI, and backup are removed**; the demo is one shared counter
+  (grow-only — concurrent increments SUM across devices and tabs) with an
+  LWW label. The domain-to-template line is now four files
+  ([vision.md §5](docs/vision.md#5-domain-split)). Removed with them:
+  `@mlc-ai/web-llm`, `loro-crdt`, and `@tanstack/offline-transactions`
+  (the op log has been the real outbox since ADR-010). Precache drops
+  ~9.4 MB → ~3.4 MB. `schemaVersion` 4 — clean break, notes-era tables are
+  not read.
+- **State is now derived, never written**: own ops append as unapplied and
+  the materializer recomputes state as a pure function of the op set —
+  immune to the multi-tab double-count/lost-delta hazards an incremental
+  fold has with delta payloads. Op-index re-reads merge flags monotonically
+  (a stale persisted read could previously re-queue a just-published op).
+- New foundational document [docs/vision.md](docs/vision.md): the
+  local-first/P2P commitments, layer cross-section, responsibility table,
+  protocol, dependency fates, and the staged road from zero to p2panda.
+
 ### Direction
 
 - **The project now actively steers toward p2panda**
