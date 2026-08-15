@@ -21,7 +21,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
@@ -32,7 +32,10 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
-      - name: Unit + component tests with coverage
+      # All four layers (unit, contract, integration, dom) — see "Test layers"
+      # in docs/architecture.md. Node 24 is required: the contract layer runs
+      # the shipping persistence over node:sqlite, unflagged only from 23.4.
+      - name: Unit, contract, integration + component tests with coverage
         run: pnpm vitest run --coverage
 
       - name: Coverage summary
@@ -59,7 +62,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
