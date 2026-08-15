@@ -1,146 +1,145 @@
 import { nextLamport } from "@/shared/db/lamport";
-import { parseNote, type Note } from "@/shared/db/schemas";
+import { emptyCounter, type Counter } from "@/shared/db/schemas";
 import { recordConflict } from "@/shared/sync/conflict-log";
-import { mergeNote } from "@/shared/sync/merge-note";
-import { decodeNoteOpPayload } from "@/shared/oplog/payload";
+import { decodeCounterOpPayload, type CounterOpPayload } from "@/shared/oplog/payload";
 import type { OpLogStore } from "./oplog-store";
 import type { StoredOp } from "./oplog-persistence";
 
 export type MaterializeTarget = {
-  getNote(id: string): Note | undefined;
-  upsertNote(note: Note): Promise<void>;
+  getCounter(): Counter | undefined;
+  upsertCounter(counter: Counter): Promise<void>;
 };
 
 export type MaterializeResult = {
   applied: string[];
   quarantined: Array<{ hash: string; reason: string }>;
-  /** Ops that cannot fold yet (e.g. a delete for a note whose upsert hasn't arrived). */
-  pending: string[];
 };
 
-/** Symmetric LWW for the tombstone field of a delete op (no wall clocks). */
-function foldDelete(local: Note, payload: { deleted_at: string; deleted_lamport: number }): Note {
-  const localTs = { value: local.deleted_at, lamport: local.deleted_lamport };
-  const remoteTs = { value: payload.deleted_at as string | null, lamport: payload.deleted_lamport };
-  let winner = localTs;
-  if (remoteTs.lamport > localTs.lamport) {
-    winner = remoteTs;
-  } else if (remoteTs.lamport === localTs.lamport) {
-    winner = (remoteTs.value ?? "") > (localTs.value ?? "") ? remoteTs : localTs;
-  }
-  if (winner === remoteTs && local.deleted_at !== remoteTs.value) {
-    recordConflict({
-      noteId: local.id,
-      field: "deleted_at",
-      lostValue: local.deleted_at,
-      lostLamport: local.deleted_lamport,
-      wonValue: remoteTs.value,
-    });
-  }
-  return {
-    ...local,
-    deleted_at: winner.value,
-    deleted_lamport: Math.max(local.deleted_lamport, payload.deleted_lamport),
-  };
-}
-
-export function notesEqual(a: Note, b: Note): boolean {
-  return (
-    a.title === b.title &&
-    a.title_lamport === b.title_lamport &&
-    a.body === b.body &&
-    a.body_doc === b.body_doc &&
-    a.deleted_at === b.deleted_at &&
-    a.deleted_lamport === b.deleted_lamport &&
-    a.updated_at === b.updated_at
-  );
-}
-
-/** What folding an op resolves to, before anything is written. */
-type FoldPlan =
-  /** The upstream op for this note hasn't arrived yet; retry next cycle. */
-  | { kind: "pending" }
-  /** Already reflected locally — mark applied without a write. */
-  | { kind: "noop"; lamportHint: number }
-  | { kind: "write"; note: Note; lamportHint: number };
-
 /**
- * Fold every unapplied "notes" op into the entity table. Ops are processed
- * per device in seq order.
+ * Rebuild the counter state row from the log — a FULL recompute, not an
+ * incremental fold, and that is deliberate:
  *
- * A payload that fails to DECODE OR MERGE is quarantined (with the head
- * already advanced at ingest), so one poison op skips itself instead of
- * wedging sync — the structural fix for the retired pipeline's
- * cursor-never-advances failure mode.
+ * The state is a pure function of the set of ops. `value` is the sum of all
+ * increment amounts (addition commutes — a grow-only counter), `label` is
+ * the set_label with the highest (lamport, value) pair (a max — also order-
+ * free). Recomputing from scratch makes materialization idempotent and
+ * immune to the multi-tab hazards an incremental fold has: a sibling tab's
+ * concurrent write, a stale read of the state row, or a re-delivered flag
+ * can double-count or drop a delta, but they cannot change what the full
+ * op set sums to. Two tabs may transiently write rows derived from
+ * different op subsets; each cycle re-reads persistence (`hydrate`), so
+ * both converge on the same total as soon as replication delivers.
+ * O(ops) per cycle is an accepted cost at template scale — BACKLOG tracks
+ * indexes and compaction.
  *
- * A failure to WRITE is deliberately NOT quarantined: a full disk or a
- * failing storage layer says nothing about the op's validity, and
- * quarantining is permanent (nothing ever un-quarantines). Those propagate
- * so the cycle fails and retries with the op still pending.
+ * A payload that fails to DECODE is quarantined (with the head already
+ * advanced at ingest) and excluded from every future recompute, so one
+ * poison op skips itself instead of wedging sync. A failure to WRITE is
+ * deliberately NOT quarantined: a full disk says nothing about the op's
+ * validity, and quarantining is permanent — those errors propagate so the
+ * cycle fails and retries with the ops still pending.
  */
-export async function materializeNoteOps(
+export async function materializeCounterOps(
   store: OpLogStore,
   target: MaterializeTarget,
 ): Promise<MaterializeResult> {
-  const result: MaterializeResult = { applied: [], quarantined: [], pending: [] };
+  const entity = "counter";
+  const result: MaterializeResult = { applied: [], quarantined: [] };
 
-  for (const op of store.unapplied("notes")) {
-    let plan: FoldPlan;
-    try {
-      plan = planFold(op, target);
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      await store.quarantine(op.hash, reason);
-      result.quarantined.push({ hash: op.hash, reason });
-      continue;
-    }
+  // Sibling tabs append to the same persisted log but not to this tab's
+  // in-memory index — re-reading persistence is what makes every tab's
+  // recompute converge on the same op set.
+  store.hydrate([entity]);
 
-    if (plan.kind === "pending") {
-      result.pending.push(op.hash);
-      continue;
-    }
+  const newlySeen = new Set(store.unapplied(entity).map((op) => op.hash));
 
-    // Past this point every throw is an infrastructure failure, not a
-    // verdict on the op — let it propagate untouched.
-    if (plan.kind === "write") {
-      await target.upsertNote(plan.note);
+  // Decode every non-quarantined op; quarantine the ones this device cannot
+  // read and fold the rest.
+  const decoded: Array<{ op: StoredOp; payload: CounterOpPayload }> = [];
+  for (const head of store.heads(entity)) {
+    for (const op of store.opsSince(entity, head.device, 1)) {
+      if (op.quarantined) continue;
+      try {
+        decoded.push({
+          op,
+          payload: decodeCounterOpPayload(new TextEncoder().encode(op.payloadJson)),
+        });
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        await store.quarantine(op.hash, reason);
+        result.quarantined.push({ hash: op.hash, reason });
+        newlySeen.delete(op.hash);
+      }
     }
-    await store.markApplied([op.hash]);
-    // The clock only advances for an op that actually landed: a quarantined
-    // or still-pending op must never move it (a poisoned counter is
-    // effectively irreversible — it re-seeds from note rows on every boot).
-    nextLamport(plan.lamportHint);
-    result.applied.push(op.hash);
   }
+
+  let next = emptyCounter();
+  let winner: { op: StoredOp; label: string; lamport: number } | null = null;
+  for (const { op, payload } of decoded) {
+    if (payload.kind === "increment") {
+      next = { ...next, value: next.value + payload.amount };
+      continue;
+    }
+    const beats =
+      winner === null ||
+      payload.lamport > winner.lamport ||
+      (payload.lamport === winner.lamport && payload.label > winner.label);
+    if (beats) {
+      winner = { op, label: payload.label, lamport: payload.lamport };
+    }
+  }
+  if (winner) {
+    next = { ...next, label: winner.label, label_lamport: winner.lamport };
+  }
+
+  // Conflict history: a NEWLY seen set_label that lost to the winner is a
+  // real concurrent edit someone typed and will never see again. Only newly
+  // seen ops are recorded — a recompute must not re-log old losses.
+  for (const { op, payload } of decoded) {
+    if (payload.kind !== "set_label" || !newlySeen.has(op.hash)) continue;
+    if (winner && op.hash !== winner.op.hash && payload.label !== winner.label) {
+      recordConflict({
+        entityId: next.id,
+        field: "label",
+        lostValue: payload.label,
+        lostLamport: payload.lamport,
+        wonValue: winner.label,
+      });
+    }
+  }
+
+  // Write only on change — every throw past decode is an infrastructure
+  // failure and propagates untouched.
+  const current = target.getCounter();
+  if (
+    !current ||
+    current.value !== next.value ||
+    current.label !== next.label ||
+    current.label_lamport !== next.label_lamport
+  ) {
+    await target.upsertCounter(next);
+  }
+
+  // The clock advances only for REMOTE ops that actually landed: quarantined
+  // ops must never move it (a poisoned counter is effectively irreversible),
+  // and this device's own ops already advanced it when the facade stamped
+  // them.
+  let remoteHint = 0;
+  for (const { op, payload } of decoded) {
+    if (!newlySeen.has(op.hash) || op.device === store.deviceId) continue;
+    if (payload.kind === "set_label" && payload.lamport > remoteHint) {
+      remoteHint = payload.lamport;
+    }
+  }
+  if (remoteHint > 0) {
+    nextLamport(remoteHint);
+  }
+
+  const toMark = decoded.filter(({ op }) => newlySeen.has(op.hash)).map(({ op }) => op.hash);
+  if (toMark.length > 0) {
+    await store.markApplied(toMark);
+  }
+  result.applied = toMark;
 
   return result;
-}
-
-/** Pure: decode + merge. Throws only on data this device cannot use. */
-function planFold(op: StoredOp, target: MaterializeTarget): FoldPlan {
-  const payload = decodeNoteOpPayload(new TextEncoder().encode(op.payloadJson));
-
-  if (payload.kind === "upsert") {
-    const remote = parseNote(payload.note);
-    const lamportHint = Math.max(remote.title_lamport, remote.deleted_lamport);
-    const local = target.getNote(remote.id);
-    if (!local) {
-      return { kind: "write", note: remote, lamportHint };
-    }
-    // mergeBodyDocs throws on a corrupt Loro snapshot → quarantine.
-    const merged = mergeNote(local, remote);
-    return notesEqual(merged, local)
-      ? { kind: "noop", lamportHint }
-      : { kind: "write", note: merged, lamportHint };
-  }
-
-  const local = target.getNote(payload.id);
-  if (!local) {
-    // The creating device's upsert hasn't arrived yet; retry next cycle.
-    return { kind: "pending" };
-  }
-  const folded = foldDelete(local, payload);
-  return notesEqual(folded, local)
-    ? { kind: "noop", lamportHint: payload.deleted_lamport }
-    : { kind: "write", note: folded, lamportHint: payload.deleted_lamport };
 }

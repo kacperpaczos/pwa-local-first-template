@@ -5,7 +5,7 @@ import { encodeOpPayload } from "@/shared/oplog/payload";
 import { MemoryOpLogPersistence } from "./oplog-persistence";
 import { OpLogStore, memoryHeadCounter } from "./oplog-store";
 
-const ENTITY = "notes";
+const ENTITY = "counter";
 
 function makeStore(
   persistence = new MemoryOpLogPersistence(),
@@ -24,7 +24,7 @@ function remoteOp(
   device: ReturnType<typeof generateDeviceKey>,
   seq: number,
   backlink: string | null,
-  payload: unknown = { kind: "upsert", note: { id: `n${seq}` } },
+  payload: unknown = { kind: "increment", amount: seq },
 ): { op: Operation; bytes: Uint8Array } {
   const bytes = encodeOpPayload(payload);
   return {
@@ -44,8 +44,8 @@ function remoteOp(
 describe("OpLogStore.append", () => {
   it("builds a hash-linked chain with 1-based seq", async () => {
     const { store } = makeStore();
-    const first = await store.append(ENTITY, { kind: "upsert", note: { id: "a" } });
-    const second = await store.append(ENTITY, { kind: "upsert", note: { id: "b" } });
+    const first = await store.append(ENTITY, { kind: "increment", amount: 1 });
+    const second = await store.append(ENTITY, { kind: "increment", amount: 1 });
     expect(first.header.seq).toBe(1);
     expect(first.header.backlink).toBeNull();
     expect(second.header.seq).toBe(2);
@@ -55,15 +55,15 @@ describe("OpLogStore.append", () => {
 
   it("seq survives store re-instantiation over the same persistence (old bug 1)", async () => {
     const { persistence, device, counter, store } = makeStore();
-    await store.append(ENTITY, { kind: "upsert", note: { id: "a" } });
-    await store.append(ENTITY, { kind: "upsert", note: { id: "b" } });
+    await store.append(ENTITY, { kind: "increment", amount: 1 });
+    await store.append(ENTITY, { kind: "increment", amount: 1 });
 
     // "Page reload": a brand-new store instance over the same persisted state.
     // Production calls hydrate() once collections finish preloading — tests
     // simulate that same step explicitly.
     const reloaded = new OpLogStore({ persistence, device, headCounter: counter });
     reloaded.hydrate([ENTITY]);
-    const next = await reloaded.append(ENTITY, { kind: "upsert", note: { id: "c" } });
+    const next = await reloaded.append(ENTITY, { kind: "increment", amount: 1 });
     expect(next.header.seq).toBe(3);
   });
 
@@ -80,23 +80,23 @@ describe("OpLogStore.append", () => {
     tabA.hydrate([ENTITY]);
     tabB.hydrate([ENTITY]); // both hydrated while the log was empty
 
-    const first = await tabA.append(ENTITY, { kind: "upsert", note: { id: "a" } });
+    const first = await tabA.append(ENTITY, { kind: "increment", amount: 1 });
     expect(counter.get(ENTITY)).toBe(1);
 
     // Tab B's index is stale, but the row IS in the shared database — B must
     // re-read rather than fail or reuse seq 1.
-    const second = await tabB.append(ENTITY, { kind: "upsert", note: { id: "b" } });
+    const second = await tabB.append(ENTITY, { kind: "increment", amount: 1 });
     expect(second.header.seq).toBe(2);
     expect(second.header.backlink).toBe(first.hash);
 
     // ...and the tab stays usable for every subsequent write.
-    const third = await tabB.append(ENTITY, { kind: "upsert", note: { id: "c" } });
+    const third = await tabB.append(ENTITY, { kind: "increment", amount: 1 });
     expect(third.header.seq).toBe(3);
   });
 
   it("self-heals when the head row was lost after its op was persisted", async () => {
     const { persistence, device, counter, store } = makeStore();
-    const first = await store.append(ENTITY, { kind: "upsert", note: { id: "a" } });
+    const first = await store.append(ENTITY, { kind: "increment", amount: 1 });
 
     // Simulate a crash between putOp and putHead: the op is durable, the
     // head row and the counter never landed.
@@ -111,7 +111,7 @@ describe("OpLogStore.append", () => {
 
     // Must chain onto the orphaned op, NOT reissue seq 1 (which would fork
     // this device's own log against any peer that already has op 1).
-    const next = await recovered.append(ENTITY, { kind: "upsert", note: { id: "b" } });
+    const next = await recovered.append(ENTITY, { kind: "increment", amount: 1 });
     expect(next.header.seq).toBe(2);
     expect(next.header.backlink).toBe(first.hash);
     void counter;
@@ -119,14 +119,14 @@ describe("OpLogStore.append", () => {
 
   it("throws rather than forking when the op at the counter's height is truly gone", async () => {
     const { device, counter, store } = makeStore();
-    await store.append(ENTITY, { kind: "upsert", note: { id: "a" } });
+    await store.append(ENTITY, { kind: "increment", amount: 1 });
 
     // Empty database + a counter that says height 1: the op is unrecoverable,
     // so extending is impossible without reusing seq 1.
     const empty = new MemoryOpLogPersistence();
     const stranded = new OpLogStore({ persistence: empty, device, headCounter: counter });
     stranded.hydrate([ENTITY]);
-    await expect(stranded.append(ENTITY, { kind: "upsert", note: { id: "b" } })).rejects.toThrow(
+    await expect(stranded.append(ENTITY, { kind: "increment", amount: 1 })).rejects.toThrow(
       /op 1 is missing/,
     );
   });
@@ -134,7 +134,7 @@ describe("OpLogStore.append", () => {
   it("resetOwnPublished re-queues only this device's ops (space change)", async () => {
     const { store } = makeStore();
     const remote = generateDeviceKey();
-    const mine = await store.append(ENTITY, { kind: "upsert", note: { id: "a" } });
+    const mine = await store.append(ENTITY, { kind: "increment", amount: 1 });
     const theirs = remoteOp(remote, 1, null);
     await store.ingest(theirs.op, theirs.bytes);
     await store.markPublished([mine.hash]);
@@ -151,20 +151,22 @@ describe("OpLogStore.append", () => {
   it("serializes concurrent appends to distinct seqs", async () => {
     const { store } = makeStore();
     const ops = await Promise.all([
-      store.append(ENTITY, { kind: "upsert", note: { id: "a" } }),
-      store.append(ENTITY, { kind: "upsert", note: { id: "b" } }),
-      store.append(ENTITY, { kind: "upsert", note: { id: "c" } }),
+      store.append(ENTITY, { kind: "increment", amount: 1 }),
+      store.append(ENTITY, { kind: "increment", amount: 1 }),
+      store.append(ENTITY, { kind: "increment", amount: 1 }),
     ]);
     expect(ops.map((op) => op.header.seq).sort()).toEqual([1, 2, 3]);
   });
 
-  it("appends start unpublished and flushable, own ops are already applied", async () => {
+  it("appends start unpublished AND unapplied — state is only ever derived from the log", async () => {
     const { store } = makeStore();
-    const op = await store.append(ENTITY, { kind: "upsert", note: { id: "a" } });
+    const op = await store.append(ENTITY, { kind: "increment", amount: 1 });
     expect(store.unpublished(ENTITY).map((row) => row.hash)).toEqual([op.hash]);
-    expect(store.unapplied(ENTITY)).toEqual([]);
+    expect(store.unapplied(ENTITY).map((row) => row.hash)).toEqual([op.hash]);
     await store.markPublished([op.hash]);
     expect(store.unpublished(ENTITY)).toEqual([]);
+    await store.markApplied([op.hash]);
+    expect(store.unapplied(ENTITY)).toEqual([]);
   });
 });
 
@@ -192,7 +194,7 @@ describe("OpLogStore.ingest", () => {
     const third = remoteOp(remote, 3, first.op.hash);
     expect(await store.ingest(third.op, third.bytes)).toBe("gap");
 
-    const forked = remoteOp(remote, 1, null, { kind: "upsert", note: { id: "other" } });
+    const forked = remoteOp(remote, 1, null, { kind: "increment", amount: 999 });
     expect(await store.ingest(forked.op, forked.bytes)).toBe("fork");
 
     expect(store.head(ENTITY, remote.deviceId)).toEqual({ seq: 1, hash: first.op.hash });

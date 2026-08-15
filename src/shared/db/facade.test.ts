@@ -1,95 +1,73 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { createPersistenceFacade } from "./facade";
-import type { AppDatabase } from "./client";
-import type { Note } from "./schemas";
 import { resetLamportForTests } from "./lamport";
+import { resetStoragePersistForTests } from "./storage-persist";
+import { FakeHub } from "@/testing/harness/fake-hub";
+import { createVirtualDevice, ENTITY } from "@/testing/harness/virtual-device";
 
 /**
- * `createFakeDb()` below hand-rolls a Map-backed collection + offline
- * executor stand-in — no real TanStack DB or OPFS SQLite runs in this file.
- * This verifies PersistenceFacade's own outbox/lamport wiring, not the real
- * persistence engine — that's only exercised for real in e2e.
+ * The facade is exercised over the real store + materializer (virtual
+ * device harness); only the transport and OPFS are stand-ins — see
+ * virtual-device.ts for what that means.
  */
-function createFakeDb(options: { syncThrows?: boolean } = {}) {
-  const map = new Map<string, Note>();
-
-  const notes = {
-    get: (id: string) => map.get(id),
-    insert: (note: Note) => {
-      map.set(note.id, structuredClone(note));
-    },
-    update: (id: string, cb: (draft: Note) => void) => {
-      const current = map.get(id);
-      if (!current) return;
-      const draft = structuredClone(current);
-      cb(draft);
-      map.set(id, draft);
-    },
-  };
-
-  const offline = {
-    createOfflineTransaction: () => {
-      let mutateFn: (() => void) | null = null;
-      return {
-        mutate: (fn: () => void) => {
-          mutateFn = fn;
-        },
-        commit: async () => {
-          mutateFn?.();
-          if (options.syncThrows) {
-            throw new Error("relay down");
-          }
-        },
-      };
-    },
-  };
-
-  return {
-    db: { notes, offline } as unknown as AppDatabase,
-    map,
-  };
-}
-
 describe("PersistenceFacade", () => {
   beforeEach(() => {
     resetLamportForTests(0);
+    resetStoragePersistForTests();
   });
 
-  it("createNote sets body_doc and bumps title_lamport", async () => {
-    const { db, map } = createFakeDb();
-    const facade = createPersistenceFacade(db);
-    const note = await facade.createNote({ title: "Hello", body: "world" });
-    expect(note.title).toBe("Hello");
-    expect(note.body).toBe("world");
-    expect(note.body_doc.length).toBeGreaterThan(0);
-    expect(note.title_lamport).toBeGreaterThan(0);
-    expect(map.get(note.id)?.body_doc).toBe(note.body_doc);
+  it("increment appends one durable op and folds it into the state row", async () => {
+    const device = createVirtualDevice(new FakeHub());
+
+    const counter = await device.facade.increment();
+
+    expect(counter.value).toBe(1);
+    expect(device.read().value).toBe(1);
+    expect(device.store.head(ENTITY, device.device.deviceId)?.seq).toBe(1);
+    await device.engine.close();
   });
 
-  it("updateNote bumps title_lamport only when the title changes", async () => {
-    const { db } = createFakeDb();
-    const facade = createPersistenceFacade(db);
-    const created = await facade.createNote({ title: "A", body: "x" });
-    const bodyOnly = await facade.updateNote(created.id, { body: "y" });
-    expect(bodyOnly.title_lamport).toBe(created.title_lamport);
-    const titled = await facade.updateNote(created.id, { title: "B" });
-    expect(titled.title_lamport).toBeGreaterThan(created.title_lamport);
+  it("increments accumulate — each one is its own op", async () => {
+    const device = createVirtualDevice(new FakeHub());
+
+    await device.facade.increment();
+    await device.facade.increment(4);
+    const counter = await device.facade.increment();
+
+    expect(counter.value).toBe(6);
+    expect(device.store.head(ENTITY, device.device.deviceId)?.seq).toBe(3);
+    await device.engine.close();
   });
 
-  it("softDeleteNote bumps deleted_lamport", async () => {
-    const { db } = createFakeDb();
-    const facade = createPersistenceFacade(db);
-    const created = await facade.createNote({ title: "del" });
-    const deleted = await facade.softDeleteNote(created.id);
-    expect(deleted.deleted_at).not.toBeNull();
-    expect(deleted.deleted_lamport).toBeGreaterThan(0);
+  it("rejects a non-positive or fractional amount", async () => {
+    const device = createVirtualDevice(new FakeHub());
+
+    expect(() => device.facade.increment(0)).toThrow();
+    expect(() => device.facade.increment(-2)).toThrow();
+    expect(() => device.facade.increment(1.5)).toThrow();
+    expect(device.read().value).toBe(0);
+    await device.engine.close();
   });
 
-  it("keeps the local write when sync throws after mutate", async () => {
-    const { db, map } = createFakeDb({ syncThrows: true });
-    const facade = createPersistenceFacade(db);
-    const note = await facade.createNote({ title: "offline-ok" });
-    expect(map.has(note.id)).toBe(true);
-    expect(note.title).toBe("offline-ok");
+  it("setLabel stamps the next Lamport value and folds via LWW", async () => {
+    const device = createVirtualDevice(new FakeHub());
+
+    await device.facade.setLabel("first");
+    const counter = await device.facade.setLabel("second");
+
+    expect(counter.label).toBe("second");
+    expect(counter.label_lamport).toBe(2);
+    await device.engine.close();
+  });
+
+  it("a write is durable before it is published", async () => {
+    const device = createVirtualDevice(new FakeHub());
+
+    await device.facade.increment();
+    // The op exists in the log regardless of what the (background) publish
+    // did — the log is the outbox.
+    const ops = device.persistence.listOps({ entity: ENTITY, device: device.device.deviceId });
+    expect(ops).toHaveLength(1);
+    expect(ops[0]?.applied).toBe(true);
+    await device.engine.close();
   });
 });

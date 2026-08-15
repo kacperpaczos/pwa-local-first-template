@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { nextLamport, peekLamport, resetLamportForTests, seedLamportFromNotes } from "./lamport";
+import { nextLamport, peekLamport, resetLamportForTests, seedLamportFromState } from "./lamport";
 
 describe("lamport clock", () => {
   afterEach(() => {
@@ -30,25 +30,22 @@ describe("lamport clock", () => {
     expect(peekLamport()).toBe(2);
   });
 
-  describe("seedLamportFromNotes", () => {
-    it("raises the clock to the max title/deleted lamport across notes", () => {
-      seedLamportFromNotes([
-        { title_lamport: 3, deleted_lamport: 1 },
-        { title_lamport: 2, deleted_lamport: 7 },
-      ]);
+  describe("seedLamportFromState", () => {
+    it("raises the clock to the max label lamport across rows", () => {
+      seedLamportFromState([{ label_lamport: 3 }, { label_lamport: 7 }]);
       expect(peekLamport()).toBe(7);
       expect(nextLamport()).toBe(8);
     });
 
     it("never lowers an already-higher clock", () => {
       resetLamportForTests(20);
-      seedLamportFromNotes([{ title_lamport: 3, deleted_lamport: 1 }]);
+      seedLamportFromState([{ label_lamport: 3 }]);
       expect(peekLamport()).toBe(20);
     });
 
-    it("is a no-op for an empty note set", () => {
+    it("is a no-op for an empty state set", () => {
       resetLamportForTests(4);
-      seedLamportFromNotes([]);
+      seedLamportFromState([]);
       expect(peekLamport()).toBe(4);
     });
   });

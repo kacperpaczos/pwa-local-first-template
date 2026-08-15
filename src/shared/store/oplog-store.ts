@@ -9,6 +9,23 @@ const APPEND_LOCK = "pwa-oplog-writer";
 export type IngestResult = "stored" | "duplicate" | "gap" | "fork" | "invalid";
 
 /**
+ * The own-log fork guard fired: the cross-tab counter says this device's log
+ * is taller than any op this tab can currently read. Almost always a sibling
+ * tab's append whose row hasn't replicated into this tab yet — transient and
+ * safe to retry briefly. If it persists, the log really is missing a row and
+ * extending it would fork this device's own chain.
+ */
+export class OwnLogLagError extends Error {
+  constructor(entity: string, height: number) {
+    super(
+      `Op log for "${entity}" is at height ${height} but op ${height} is missing — ` +
+        "the log cannot be extended without forking it",
+    );
+    this.name = "OwnLogLagError";
+  }
+}
+
+/**
  * Cross-tab monotone counter for the device's own log height. localStorage
  * writes are synchronous and immediately visible to sibling tabs, which the
  * async collection replication is not — under the append Web Lock this gives
@@ -129,12 +146,35 @@ export class OpLogStore {
   hydrate(entities: readonly string[]): void {
     for (const entity of entities) {
       for (const op of this.persistence.listOps({ entity })) {
-        this.opsByHash.set(op.hash, op);
+        this.mergeIntoIndex(op);
       }
       for (const head of this.persistence.listHeads(entity)) {
-        this.headsByKey.set(head.id, head);
+        const known = this.headsByKey.get(head.id);
+        if (!known || head.seq >= known.seq) this.headsByKey.set(head.id, head);
       }
     }
+  }
+
+  /**
+   * Fold a persisted row into the index WITHOUT regressing state. Persisted
+   * reads can lag this instance's own writes (async write confirmation), and
+   * every flag only ever moves false → true — so a re-read must never turn a
+   * published/applied/quarantined op back into a pending one. Doing so
+   * re-queued just-published ops between two sync cycles.
+   */
+  private mergeIntoIndex(row: StoredOp): void {
+    const known = this.opsByHash.get(row.hash);
+    if (!known) {
+      this.opsByHash.set(row.hash, row);
+      return;
+    }
+    this.opsByHash.set(row.hash, {
+      ...row,
+      applied: known.applied || row.applied,
+      published: known.published || row.published,
+      quarantined: known.quarantined || row.quarantined,
+      quarantineReason: known.quarantineReason ?? row.quarantineReason,
+    });
   }
 
   /**
@@ -169,10 +209,7 @@ export class OpLogStore {
         : (this.opAtIndexed(entity, own, height)?.hash ?? null);
 
     if (backlink === null) {
-      throw new Error(
-        `Op log for "${entity}" is at height ${height} but op ${height} is missing — ` +
-          "the log cannot be extended without forking it",
-      );
+      throw new OwnLogLagError(entity, height);
     }
     return { height, backlink };
   }
@@ -180,10 +217,13 @@ export class OpLogStore {
   /** Pull one device's rows from durable storage into the read index. */
   private refreshDeviceFromPersistence(entity: string, device: string): void {
     for (const op of this.persistence.listOps({ entity, device })) {
-      this.opsByHash.set(op.hash, op);
+      this.mergeIntoIndex(op);
     }
     const head = this.persistence.getHead(entity, device);
-    if (head) this.headsByKey.set(head.id, head);
+    if (head) {
+      const known = this.headsByKey.get(head.id);
+      if (!known || head.seq >= known.seq) this.headsByKey.set(head.id, head);
+    }
   }
 
   private maxOwnSeqIndexed(entity: string): number {
@@ -221,9 +261,12 @@ export class OpLogStore {
         timestamp: op.header.timestamp,
         signature: op.signature,
         payloadJson: JSON.stringify(payload),
-        // Local writes are already folded into the entity table by the
-        // facade's own transaction — the materializer must not re-apply them.
-        applied: true,
+        // Own ops go through the materializer like everyone else's: the
+        // state row is DERIVED from the log, never written directly. With
+        // delta payloads (increment) an optimistically pre-folded write
+        // could double-count or drop under a stale cross-tab read; a single
+        // fold path cannot.
+        applied: false,
         published: false,
         quarantined: false,
         quarantineReason: null,

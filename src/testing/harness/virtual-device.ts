@@ -1,9 +1,8 @@
 import type { AppDatabase } from "@/shared/db/client";
 import { createPersistenceFacade, type PersistenceFacade } from "@/shared/db/facade";
-import { parseNote, type Note } from "@/shared/db/schemas";
+import { COUNTER_ID, emptyCounter, type Counter } from "@/shared/db/schemas";
 import { generateDeviceKey, type DeviceKey } from "@/shared/identity/device";
-import type { NoteOpPayload } from "@/shared/oplog/payload";
-import type { MaterializeTarget } from "@/shared/store/materialize";
+import { materializeCounterOps, type MaterializeTarget } from "@/shared/store/materialize";
 import { MemoryOpLogPersistence } from "@/shared/store/oplog-persistence";
 import { memoryHeadCounter, OpLogStore, type HeadCounter } from "@/shared/store/oplog-store";
 import { SyncEngine } from "@/shared/sync/engine";
@@ -11,7 +10,7 @@ import type { LogSyncTransport } from "@/shared/sync/transport";
 import { type FakeHub, FakeHubTransport } from "./fake-hub";
 
 /** Mirrors `SYNC_ENTITY` in db/client.ts, which cannot be imported here (OPFS). */
-export const ENTITY = "notes";
+export const ENTITY = "counter";
 
 export type VirtualDevice = {
   device: DeviceKey;
@@ -20,27 +19,22 @@ export type VirtualDevice = {
   store: OpLogStore;
   engine: SyncEngine;
   facade: PersistenceFacade;
-  /** Materialized note state — the stand-in for the OPFS `notes` table. */
-  notes: Map<string, Note>;
+  /** Materialized state — the stand-in for the OPFS `counter` table. */
+  state: Map<string, Counter>;
+  read: () => Counter;
 };
 
 /**
  * One device's full local stack, wired from real production code:
- * `PersistenceFacade` → outbox → `OpLogStore` → `SyncEngine` → transport →
- * `materializeNoteOps` → note state.
+ * `PersistenceFacade` → `OpLogStore.append` → materializer → `SyncEngine` →
+ * transport. The facade talks to the same `AppDatabase` surface the real app
+ * wires in `db/client.ts` (store + engine + materializeLocal), so a write
+ * that never reaches the log fails this layer instead of passing it.
  *
- * Only three things are stand-ins, and each is covered elsewhere:
+ * Only two things are stand-ins, and each is covered elsewhere:
  * - the transport is a `FakeHubTransport` (real Gun wire: gun-log-transport.test.ts + e2e),
  * - persistence is `MemoryOpLogPersistence` (the TanStack/SQLite implementation
- *   is held to the same contract in oplog-persistence.contract.ts),
- * - the notes collection + outbox executor are Map-backed (real TanStack DB and
- *   OPFS: e2e only).
- *
- * The outbox stand-in deliberately reproduces `mutationFns.syncNotes` from
- * db/client.ts — append every mutated row to this device's log, then flush.
- * A stub that merely applied the mutation would make every test here pass
- * without the log ever being written, which is the gap this harness exists
- * to close.
+ *   is held to the same contract in oplog-persistence.contract.ts).
  */
 export function createVirtualDevice(
   hub: FakeHub,
@@ -50,58 +44,11 @@ export function createVirtualDevice(
   const persistence = new MemoryOpLogPersistence();
   const counter = memoryHeadCounter();
   const store = new OpLogStore({ persistence, device, headCounter: counter });
-  const notes = new Map<string, Note>();
-
-  // Ids touched by the current outbox transaction, in mutation order — the
-  // stand-in for `transaction.mutations`.
-  let touched: string[] = [];
-
-  const collection = {
-    get: (id: string) => notes.get(id),
-    insert: (note: Note) => {
-      notes.set(note.id, structuredClone(note));
-      touched.push(note.id);
-    },
-    update: (id: string, cb: (draft: Note) => void) => {
-      const current = notes.get(id);
-      if (!current) return;
-      const draft = structuredClone(current);
-      cb(draft);
-      notes.set(id, draft);
-      touched.push(id);
-    },
-    get toArray() {
-      return [...notes.values()];
-    },
-  };
-
-  const offline = {
-    createOfflineTransaction: () => {
-      let mutateFn: (() => void) | null = null;
-      return {
-        mutate: (fn: () => void) => {
-          mutateFn = fn;
-        },
-        commit: async () => {
-          touched = [];
-          mutateFn?.();
-          const ids = touched;
-          touched = [];
-          for (const id of ids) {
-            const raw = notes.get(id);
-            if (!raw) continue;
-            const note = parseNote(raw);
-            await store.append(ENTITY, { kind: "upsert", note } satisfies NoteOpPayload);
-          }
-          await engine.flush();
-        },
-      };
-    },
-  };
+  const state = new Map<string, Counter>();
 
   const target: MaterializeTarget = {
-    getNote: (id) => notes.get(id),
-    upsertNote: async (note) => void notes.set(note.id, note),
+    getCounter: () => state.get(COUNTER_ID),
+    upsertCounter: async (row) => void state.set(COUNTER_ID, row),
   };
 
   const engine = new SyncEngine({
@@ -115,9 +62,28 @@ export function createVirtualDevice(
     reactive: false,
   });
 
-  const facade = createPersistenceFacade({ notes: collection, offline } as unknown as AppDatabase);
+  const db = {
+    store,
+    engine,
+    entity: ENTITY,
+    materializeLocal: async () => {
+      await materializeCounterOps(store, target);
+      return state.get(COUNTER_ID) ?? emptyCounter();
+    },
+  } as unknown as AppDatabase;
 
-  return { device, persistence, counter, store, engine, facade, notes };
+  const facade = createPersistenceFacade(db);
+
+  return {
+    device,
+    persistence,
+    counter,
+    store,
+    engine,
+    facade,
+    state,
+    read: () => state.get(COUNTER_ID) ?? emptyCounter(),
+  };
 }
 
 /** Runs one sync cycle on every device until nothing new lands. */

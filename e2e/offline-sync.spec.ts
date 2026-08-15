@@ -1,35 +1,32 @@
-import { expect, test } from "@playwright/test";
+import { test } from "@playwright/test";
 import {
-  createNote,
-  expectNoteVisible,
+  clickIncrement,
+  expectCounterValue,
   openTwoPeers,
   resetGunPeer,
   syncNow,
-  uniqueTitle,
-  waitForNoteSynced,
+  waitForPublished,
 } from "./helpers";
 
 test.beforeEach(async () => {
   await resetGunPeer();
 });
 
-test("offline create on A becomes visible on B after A reconnects", async ({ browser }) => {
+test("offline increments on A become visible on B after A reconnects", async ({ browser }) => {
   const { contextA, contextB, pageA, pageB } = await openTwoPeers(browser);
 
-  const title = uniqueTitle("Offline peer");
-
   await contextA.setOffline(true);
-  await createNote(pageA, title, "offline body");
-  await expectNoteVisible(pageA, title);
+  await clickIncrement(pageA, 3);
+  // Fully functional offline: the local fold lands with no relay reachable.
+  await expectCounterValue(pageA, 3);
 
   await contextA.setOffline(false);
-  // Outbox retries on online; wait for this note's own push cycle (not relay stats).
+  // The log is the outbox — reconnect + a cycle publishes the queued ops.
   await syncNow(pageA);
-  await waitForNoteSynced(pageA, title);
+  await waitForPublished(pageA);
 
   await syncNow(pageB);
-  await expectNoteVisible(pageB, title);
-  await expect(pageB.getByTestId("note-item").filter({ hasText: title })).toHaveCount(1);
+  await expectCounterValue(pageB, 3, 30_000);
 
   await contextA.close();
   await contextB.close();

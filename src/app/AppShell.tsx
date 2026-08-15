@@ -2,8 +2,7 @@ import { createMemo, For, Show, createEffect, type Component, type ParentProps }
 import { A, useLocation } from "@solidjs/router";
 import { useColorMode } from "@kobalte/core";
 import { useStore } from "@nanostores/solid";
-import { Bot, CloudOff, Home, Loader2, NotebookPen, Settings } from "lucide-solid";
-import { aiStatusStore } from "@/ai";
+import { CloudOff, Hash, Loader2, Settings } from "lucide-solid";
 import { syncStatusStore } from "@/shared/sync/status";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -32,13 +31,10 @@ import { appName } from "@/shared/lib";
 const baseNavItems: Array<{
   title: string;
   url: string;
-  icon: typeof Home;
+  icon: typeof Hash;
   end?: boolean;
-  aiOnly?: boolean;
 }> = [
-  { title: "Home", url: "/", icon: Home, end: true },
-  { title: "Notes", url: "/notes", icon: NotebookPen },
-  { title: "AI", url: "/ai", icon: Bot, aiOnly: true },
+  { title: "Counter", url: "/", icon: Hash, end: true },
   { title: "Settings", url: "/settings", icon: Settings },
 ];
 
@@ -55,9 +51,7 @@ const syncBadge: Record<
 };
 
 const pageTitle = (pathname: string): string => {
-  if (pathname === "/") return "Home";
-  if (pathname.startsWith("/notes")) return "Notes";
-  if (pathname.startsWith("/ai")) return "AI";
+  if (pathname === "/") return "Counter";
   if (pathname.startsWith("/settings")) return "Settings";
   return appName;
 };
@@ -65,18 +59,8 @@ const pageTitle = (pathname: string): string => {
 const AppShell: Component<ParentProps> = (props) => {
   const location = useLocation();
   const { colorMode } = useColorMode();
-  const aiStatus = useStore(aiStatusStore);
   const syncStatus = useStore(syncStatusStore);
-  const navItems = createMemo(() =>
-    baseNavItems.filter((item) => {
-      if (!item.aiOnly) return true;
-      const s = aiStatus();
-      // Hide only when the feature flag is off. Keep the link for no-webgpu so
-      // users (and e2e) can reach the unavailable explanation without a full
-      // document reload that would re-open OPFS.
-      return !(s.kind === "unavailable" && s.reason === "disabled");
-    }),
-  );
+  const navItems = createMemo(() => baseNavItems);
 
   createEffect(() => {
     const meta = document.querySelector('meta[name="theme-color"]');

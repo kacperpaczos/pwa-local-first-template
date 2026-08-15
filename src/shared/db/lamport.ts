@@ -12,18 +12,15 @@ export function peekLamport(): number {
 
 /**
  * Seed the clock from the highest Lamport value already present in the
- * local notes on startup, so a fresh page load (before any remote mutation
+ * local state on startup, so a fresh page load (before any remote mutation
  * bumps it via `nextLamport(remoteHint)`) can't hand out a value that
  * collides with one this device already assigned in a previous session.
  * Only raises the clock — never lowers it.
  */
-export function seedLamportFromNotes(
-  notes: Iterable<{ title_lamport: number; deleted_lamport: number }>,
-): void {
+export function seedLamportFromState(rows: Iterable<{ label_lamport: number }>): void {
   let max = 0;
-  for (const note of notes) {
-    if (note.title_lamport > max) max = note.title_lamport;
-    if (note.deleted_lamport > max) max = note.deleted_lamport;
+  for (const row of rows) {
+    if (row.label_lamport > max) max = row.label_lamport;
   }
   if (max > lamport) {
     lamport = max;

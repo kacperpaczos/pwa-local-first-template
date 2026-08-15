@@ -1,7 +1,6 @@
 import type { Component } from "solid-js";
 import PageHeader from "@/components/PageHeader";
 import AppearanceSection from "./AppearanceSection";
-import BackupSection from "./BackupSection";
 import ConflictHistorySection from "./ConflictHistorySection";
 import DevicesSection from "./DevicesSection";
 import PairingSection from "./PairingSection";
@@ -13,11 +12,10 @@ const SettingsPage: Component = () => {
     <div class="mx-auto max-w-2xl space-y-4 md:space-y-6">
       <PageHeader
         title="Settings"
-        description="Appearance, backup, device pairing, recovery, and storage durability."
+        description="Appearance, device pairing, recovery, and storage durability."
       />
 
       <AppearanceSection />
-      <BackupSection />
       <ConflictHistorySection />
       <PairingSection />
       <DevicesSection />
