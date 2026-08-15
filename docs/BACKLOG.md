@@ -64,6 +64,10 @@ Persisting acks (a third small collection, or a column on `oplog_heads`) would
 make GC deterministic across reloads. Deferred from v0.1 to avoid another
 schema version for a best-effort background job.
 
+The *gate* itself is now covered against real acks across three devices
+(`gc-coverage.integration.test.ts`), so a regression in coverage logic fails
+fast. Persisting acks across reloads remains open.
+
 ### 5. Corrupt device key silently mints a new identity
 
 `shared/identity/device.ts#loadDeviceKey` returns `null` on unparseable
@@ -116,10 +120,14 @@ batched read.
 
 ### 11. Crash between append and publish
 
-The log doubles as the outbox (`published` flag), which replaced the
+~~The log doubles as the outbox (`published` flag), which replaced the
 offline-transactions retry path for network failures. A crash between the
 durable append and the publish leaves the op queued — correct by design, but
-there is no test for it. Add one.
+there is no test for it. Add one.~~
+
+**Done.** `sync-stack.integration.test.ts` appends without flushing, rebuilds
+the store + engine over the same persisted state (the boot path), and asserts
+the op still ships and lands on a peer.
 
 ---
 

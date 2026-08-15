@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Two new test layers** (`docs/architecture.md#test-layers`). `contract`
+  runs one suite against every implementation of a port — `OpLogPersistence`
+  is now exercised as both `MemoryOpLogPersistence` and the shipping
+  `CollectionOpLogPersistence` (real TanStack persisted collections over
+  `node:sqlite`), which previously had no test at all. `integration` composes
+  the real local stack (facade → outbox → op log → engine → materializer)
+  into 2-3 virtual devices, covering the facade→log path that only e2e
+  touched, plus three-device convergence, restart-mid-cycle (closes BACKLOG
+  §11) and tombstone GC gated on real acknowledgements.
+- Shared test harness under `src/testing/harness/` (`FakeHub` extracted from
+  `engine.test.ts`, `createVirtualDevice`, node:sqlite collections).
+  Test-only and excluded from coverage.
+- `pnpm test:e2e` now picks free ports when 8765 / 4173 are taken, and honours
+  `GUN_PEER_PORT` / `E2E_WEB_PORT` (`scripts/e2e.mjs`).
+
+### Changed
+
+- `CollectionOpLogPersistence` and `persistLocal` moved from `db/client.ts` to
+  `shared/store/collection-oplog-persistence.ts` — importing them no longer
+  drags in OPFS, so the port and both its implementations sit together and can
+  be contract-tested outside a browser.
+- CI runs on Node 24 (the contract layer needs unflagged `node:sqlite`).
+
 ## 0.1.0
 
 First tagged release. Repo audit + repair pass focused on hardening the sync

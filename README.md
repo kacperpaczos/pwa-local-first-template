@@ -167,31 +167,43 @@ In `import.meta.env.DEV`, if `VITE_GUN_PEERS` is empty, the app defaults to `htt
 | `pnpm preview` | Preview production build |
 | `pnpm typecheck` | `tsc --noEmit` |
 | `pnpm lint` / `pnpm lint:fix` | Biome (lint + format) |
-| `pnpm test` / `pnpm test:unit` | Vitest (`unit` + `dom` projects) |
+| `pnpm test` | Vitest, all four layers |
+| `pnpm test:unit` / `test:contract` / `test:integration` / `test:dom` | One layer at a time |
 | `pnpm test:e2e` | Playwright (Chromium smoke + sync) |
 | `pnpm test:e2e:sync` | Sync project only (serial + peer reset) |
-| `pnpm test:all` | Unit + e2e |
+| `pnpm test:all` | Every Vitest layer + e2e |
 
 **Definition of done:** `pnpm lint && pnpm typecheck && pnpm test:all` must be green. CI runs the same on `push` / `pull_request` to `main`, plus a weekly scheduled run against dependency drift (`.github/workflows/ci.yml`).
 
 ### Test pyramid
 
+Each layer declares what is real and what is a stand-in — see
+[Test layers](docs/architecture.md#test-layers) for the full table.
+
 ```text
-Unit (Vitest, 2 projects)
-  unit (node)   op header/chain/store, materializer, protocol, merge,
-                Gun transport (fake graph, real SEA + AES-GCM crypto),
-                facade / gc (mocked @tanstack/db), AI gates/session,
-                identity/crypto (all real)
-  dom (jsdom)   component tests (Solid Testing Library) — install
-                prompt, error boundary, pairing error path
-E2E (Playwright)  CRUD, offline→online, multi-tab OPFS, Gun peers
-                  (real network + real OPFS), concurrent body merge,
-                  backup, AI panel (mocked model, real orchestration)
+Vitest (4 projects)
+  unit (node)        one module in isolation: op header/chain/store,
+                     materializer, protocol, merge, Gun transport (fake
+                     graph, real SEA + AES-GCM crypto), AI gates/session,
+                     identity/crypto (all real)
+  contract (node)    a port + EVERY implementation of it, one suite:
+                     OpLogPersistence over both MemoryOpLogPersistence and
+                     the shipping CollectionOpLogPersistence (real TanStack
+                     persisted collections on node:sqlite)
+  integration (node) the local stack, 2-3 virtual devices, no browser:
+                     facade → outbox → op log → engine → materializer;
+                     convergence, restart-mid-cycle, GC over a real ack roster
+  dom (jsdom)        component tests (Solid Testing Library) — install
+                     prompt, error boundary, pairing error path
+E2E (Playwright)     CRUD, offline→online, multi-tab OPFS, Gun peers
+                     (real network + real OPFS), concurrent body merge,
+                     backup, AI panel (mocked model, real orchestration)
 ```
 
 Notes for e2e:
 
 - Chromium only (OPFS).
+- `pnpm test:e2e` (`scripts/e2e.mjs`) picks free ports when 8765/4173 are taken; `GUN_PEER_PORT` / `E2E_WEB_PORT` override it.
 - `chromium-sync` resets the Gun peer via `POST /test/reset` and seeds a shared SEA pair + space key directly into `localStorage` via Playwright's `addInitScript` (no camera) — done pre-boot so both are present before the app's first read.
 - `/test/*` and `__createAiProvider` are gated to test/dev modes. `__importIdentity`/`__exportIdentity` (`src/shared/identity/e2e.ts`) exist as DEV-console tooling for manual identity export/import but aren't currently called by the automated e2e suite.
 - Helpers live in `e2e/helpers.ts`.

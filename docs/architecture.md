@@ -45,6 +45,40 @@ flowchart TB
 | Domain (notes → other) | schemas + facade + features + op payload schema | [`src/shared/db/schemas.ts`](../src/shared/db/schemas.ts), [`src/shared/oplog/payload.ts`](../src/shared/oplog/payload.ts), [`src/features/`](../src/features/) |
 | Identity / space crypto | SEA pair + per-device signing key + space key | [`src/shared/identity/`](../src/shared/identity/), [`src/shared/crypto/`](../src/shared/crypto/) |
 
+## Test layers
+
+Each Vitest project is a layer, and the layer — not a comment in the file —
+declares what is real and what is a stand-in. Put a new test in the highest
+layer that can still express it deterministically.
+
+| Layer | Project / tool | Real | Stand-in |
+| --- | --- | --- | --- |
+| Unit | `unit` (node) | one module | everything around it |
+| Contract | `contract` (node) | a port **and every implementation of it** | whatever sits below the port |
+| Integration | `integration` (node) | facade → outbox → op log → engine → materializer, 2-3 devices | transport (`FakeHub`), OPFS, browser |
+| Component | `dom` (jsdom) | one Solid component | the rest of the stack |
+| E2E | Playwright | everything: OPFS, service worker, real Gun wire, multiple tabs | nothing (except the WebLLM model) |
+
+- **Contract** exists because a port with two implementations tested only
+  through one of them is a port in name only. `OpLogPersistence` is held to
+  [`oplog-persistence.contract.ts`](../src/shared/store/oplog-persistence.contract.ts)
+  as both `MemoryOpLogPersistence` (what the unit layer runs on) and
+  `CollectionOpLogPersistence` (what ships). The contract states the one
+  difference between them rather than hiding it: **reads are eventually
+  consistent after a write**, because TanStack confirms persisted writes
+  asynchronously — which is exactly why `OpLogStore` keeps its own read index
+  (see ADR-010's consequences).
+- **Integration** exists because the interesting failures live between
+  modules and across devices. The harness
+  ([`src/testing/harness/`](../src/testing/harness/)) composes real production
+  code into a `createVirtualDevice()`; its outbox stand-in deliberately
+  reproduces `mutationFns.syncNotes` from `db/client.ts`, so a write that
+  never reaches the log fails the layer instead of passing it.
+- `src/testing/**` is test-only: no app module imports it, and it is excluded
+  from coverage.
+- The contract layer needs Node ≥ 23.4 (unflagged `node:sqlite`). On older
+  Node it reports a visible skip rather than quietly covering nothing.
+
 ## Invariants
 
 1. **OPFS SQLite is source of truth.** Gun is transport only.
