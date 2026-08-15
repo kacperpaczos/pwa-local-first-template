@@ -8,4 +8,8 @@ export const syncMetaSchema = z.object({
 
 export type SyncMeta = z.infer<typeof syncMetaSchema>;
 
-export const RELAY_SYNC_META_ID = "relay";
+/** Cursor row for the active SyncTransport (Gun mesh). */
+export const SYNC_META_ID = "sync";
+
+/** @deprecated Use SYNC_META_ID */
+export const RELAY_SYNC_META_ID = SYNC_META_ID;

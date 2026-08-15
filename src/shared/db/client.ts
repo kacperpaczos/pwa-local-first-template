@@ -12,14 +12,14 @@ import type { Note } from "./schemas";
 import type { SyncMeta } from "./sync-meta";
 import { SyncMutex, runSyncCycle } from "@/shared/sync/mutex";
 import type { SyncMutation, SyncTransport } from "@/shared/sync/transport";
-import { createSyncTransport } from "@/shared/sync/ws-transport";
+import { createSyncTransport } from "@/shared/sync/gun-transport";
 import {
   applyRemoteMutations,
-  readRelayCursor,
+  readSyncCursor,
   withSyncStatus,
-  writeRelayCursor,
+  writeSyncCursor,
 } from "@/shared/sync/apply-remote";
-import { setSyncStatus } from "@/shared/sync/status";
+import { setSyncStatus, syncStatusStore } from "@/shared/sync/status";
 
 const DB_FILE = "pwa-local-first.sqlite";
 const DB_NAME = "pwa-local-first";
@@ -30,9 +30,11 @@ export type AppDatabase = {
   offline: OfflineExecutor;
   transport: SyncTransport;
   syncMutex: SyncMutex;
-  /** Raw wa-sqlite handle — integrity checks (Etap 4.0) and future .sqlite export. */
+  /** Raw wa-sqlite handle — integrity checks and SQL dump export. */
   rawDb: { execute: <TRow = unknown>(sql: string, params?: readonly unknown[]) => Promise<readonly TRow[]> };
   pullRemote: () => Promise<void>;
+  /** Close the current Gun transport and open a fresh one (post identity import). */
+  reinitSyncTransport: () => Promise<void>;
   close: () => Promise<void>;
 };
 
@@ -96,17 +98,17 @@ export async function openAppDatabase(): Promise<AppDatabase> {
     }),
   );
 
-  const transport = createSyncTransport();
+  let transport: SyncTransport = createSyncTransport();
   const syncMutex = new SyncMutex();
 
   const pullRemote = async () => {
     await withSyncStatus(async () => {
       await syncMutex.runExclusive(async () => {
-        const cursor = readRelayCursor(syncMeta);
+        const cursor = readSyncCursor(syncMeta);
         const pull = await transport.pull(cursor);
         await applyRemoteMutations({ notes, syncMeta }, pull.mutations);
         if (pull.cursor !== cursor) {
-          await writeRelayCursor(syncMeta, pull.cursor);
+          await writeSyncCursor(syncMeta, pull.cursor);
         }
       });
     });
@@ -120,25 +122,36 @@ export async function openAppDatabase(): Promise<AppDatabase> {
 
         await withSyncStatus(async () => {
           try {
-            const cursor = readRelayCursor(syncMeta);
+            const cursor = readSyncCursor(syncMeta);
             const { pull } = await runSyncCycle(transport, syncMutex, {
               cursor,
               outbox: mutationsFromTransaction(idempotencyKey, transaction.mutations),
             });
             await applyRemoteMutations({ notes, syncMeta }, pull.mutations);
             if (pull.cursor !== cursor) {
-              await writeRelayCursor(syncMeta, pull.cursor);
+              await writeSyncCursor(syncMeta, pull.cursor);
             }
           } catch (error) {
-            setSyncStatus(
-              typeof navigator !== "undefined" && !navigator.onLine ? "offline" : "idle",
-            );
+            if (syncStatusStore.get() !== "outdated") {
+              setSyncStatus(
+                typeof navigator !== "undefined" && !navigator.onLine ? "offline" : "idle",
+              );
+            }
             throw error;
           }
         });
       },
     },
   });
+
+  const reinitSyncTransport = async () => {
+    const previous = transport;
+    if ("close" in previous && typeof previous.close === "function") {
+      await previous.close();
+    }
+    transport = createSyncTransport();
+    dbHandle.transport = transport;
+  };
 
   const onOnline = () => {
     void pullRemote().catch(() => {
@@ -149,7 +162,7 @@ export async function openAppDatabase(): Promise<AppDatabase> {
     window.addEventListener("online", onOnline);
   }
 
-  return {
+  const dbHandle: AppDatabase = {
     notes,
     syncMeta,
     offline,
@@ -157,6 +170,7 @@ export async function openAppDatabase(): Promise<AppDatabase> {
     syncMutex,
     rawDb: database,
     pullRemote,
+    reinitSyncTransport,
     close: async () => {
       if (typeof window !== "undefined") {
         window.removeEventListener("online", onOnline);
@@ -169,4 +183,11 @@ export async function openAppDatabase(): Promise<AppDatabase> {
       await database.close?.();
     },
   };
+
+  return dbHandle;
+}
+
+/** Close and recreate Gun transport after identity / space-key import. */
+export async function reinitSyncTransport(db: AppDatabase): Promise<void> {
+  await db.reinitSyncTransport();
 }

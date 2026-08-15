@@ -1,6 +1,6 @@
 export type SyncMutation = {
   idempotencyKey: string;
-  entity: "notes";
+  entity: string;
   op: "upsert" | "soft_delete";
   payload: unknown;
 };
@@ -22,10 +22,11 @@ export type Conflict = {
 
 /**
  * Swappable sync adapter.
- * Phase 2 default: WsSyncTransport (relay). Fallback: NoopSyncTransport.
+ * Default: GunSyncTransport (SEA-signed mesh). Fallback: NoopSyncTransport.
  */
 export interface SyncTransport {
   push(outbox: readonly SyncMutation[]): Promise<PushResult>;
   pull(cursor: string | null): Promise<PullResult>;
+  /** No-op on transports: conflict merge happens locally in applyRemoteMutations. */
   resolve(conflicts: readonly Conflict[]): Promise<void>;
 }

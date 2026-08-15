@@ -1,9 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { estimateStorageHeadroom } from "./storage";
+import {
+  aiStorageHeadroomStore,
+  estimateStorageHeadroom,
+  refreshAiStorageHeadroom,
+} from "./storage";
 
 describe("estimateStorageHeadroom", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    aiStorageHeadroomStore.set(null);
   });
 
   it("is optimistic when navigator.storage.estimate is unsupported", async () => {
@@ -38,5 +43,14 @@ describe("estimateStorageHeadroom", () => {
     });
     const result = await estimateStorageHeadroom(1_000_000);
     expect(result.ok).toBe(true);
+  });
+
+  it("refreshAiStorageHeadroom publishes to aiStorageHeadroomStore", async () => {
+    vi.stubGlobal("navigator", {
+      storage: { estimate: async () => ({ quota: 5_000_000, usage: 0 }) },
+    });
+    const result = await refreshAiStorageHeadroom(1_000_000);
+    expect(result.ok).toBe(true);
+    expect(aiStorageHeadroomStore.get()).toEqual(result);
   });
 });

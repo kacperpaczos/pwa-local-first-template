@@ -1,7 +1,31 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { mergeNote } from "./merge-note";
 import { createBodyDoc, updateBodyDoc } from "../db/crdt";
 import type { Note } from "../db/schemas";
+import {
+  CONFLICT_LOG_STORAGE_KEY,
+  listConflicts,
+} from "./conflict-log";
+
+function stubLocalStorage() {
+  const map = new Map<string, string>();
+  const storage = {
+    getItem: (key: string) => map.get(key) ?? null,
+    setItem: (key: string, value: string) => {
+      map.set(key, value);
+    },
+    removeItem: (key: string) => {
+      map.delete(key);
+    },
+    clear: () => map.clear(),
+    key: () => null,
+    get length() {
+      return map.size;
+    },
+  };
+  vi.stubGlobal("localStorage", storage);
+  return storage;
+}
 
 function note(partial: Partial<Note> & Pick<Note, "id">): Note {
   const body = createBodyDoc("");
@@ -75,6 +99,56 @@ describe("mergeNote — deleted_at (per-field LWW)", () => {
     expect(merged.deleted_at).toBe("2026-01-01T00:00:00.000Z");
     expect(merged.title_lamport).toBe(5);
     expect(merged.deleted_lamport).toBe(4);
+  });
+});
+
+describe("mergeNote — conflict_log recording", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("records when remote title wins over a different local title", () => {
+    const storage = stubLocalStorage();
+    const local = note({ id: "1", title: "local", title_lamport: 1 });
+    const remote = note({ id: "1", title: "remote", title_lamport: 2 });
+    mergeNote(local, remote);
+    const conflicts = listConflicts({ noteId: "1" }, storage);
+    expect(conflicts).toHaveLength(1);
+    expect(conflicts[0]).toMatchObject({
+      field: "title",
+      lostValue: "local",
+      lostLamport: 1,
+      wonValue: "remote",
+    });
+    expect(storage.getItem(CONFLICT_LOG_STORAGE_KEY)).toBeTruthy();
+  });
+
+  it("records when remote deleted_at wins over a different local value", () => {
+    const storage = stubLocalStorage();
+    const local = note({ id: "1", deleted_at: null, deleted_lamport: 1 });
+    const remote = note({
+      id: "1",
+      deleted_at: "2026-01-01T00:00:00.000Z",
+      deleted_lamport: 2,
+    });
+    mergeNote(local, remote);
+    const conflicts = listConflicts({ noteId: "1" }, storage);
+    expect(conflicts.some((c) => c.field === "deleted_at")).toBe(true);
+  });
+
+  it("does not record when local title wins", () => {
+    const storage = stubLocalStorage();
+    const local = note({ id: "1", title: "local title", title_lamport: 5 });
+    const remote = note({ id: "1", title: "stale title", title_lamport: 1 });
+    mergeNote(local, remote);
+    expect(listConflicts({ noteId: "1" }, storage)).toHaveLength(0);
+  });
+
+  it("is a no-op without localStorage", () => {
+    vi.stubGlobal("localStorage", undefined);
+    const local = note({ id: "1", title: "local", title_lamport: 1 });
+    const remote = note({ id: "1", title: "remote", title_lamport: 2 });
+    expect(() => mergeNote(local, remote)).not.toThrow();
   });
 });
 

@@ -3,13 +3,14 @@ import {
   createNote,
   expectNoteVisible,
   openTwoPeers,
-  resetRelay,
+  resetGunPeer,
   syncNow,
   uniqueTitle,
+  waitForNoteSynced,
 } from "./helpers";
 
 test.beforeEach(async () => {
-  await resetRelay();
+  await resetGunPeer();
 });
 
 test("offline create on A becomes visible on B after A reconnects", async ({ browser }) => {
@@ -22,15 +23,9 @@ test("offline create on A becomes visible on B after A reconnects", async ({ bro
   await expectNoteVisible(pageA, title);
 
   await contextA.setOffline(false);
-  // Outbox retries on online; Sync also pulls — give A a nudge to flush/pull.
+  // Outbox retries on online; wait for this note's own push cycle (not relay stats).
   await syncNow(pageA);
-  await expect
-    .poll(async () => {
-      const res = await fetch("http://127.0.0.1:8787/test/stats");
-      const stats = (await res.json()) as { entries: number };
-      return stats.entries;
-    }, { timeout: 15_000 })
-    .toBeGreaterThan(0);
+  await waitForNoteSynced(pageA, title);
 
   await syncNow(pageB);
   await expectNoteVisible(pageB, title);

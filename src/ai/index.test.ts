@@ -36,7 +36,7 @@ describe("initAiFeature (real config + real gpu detection)", () => {
     vi.stubGlobal("navigator", { gpu: {} });
 
     const { initAiFeature } = await import("./index");
-    expect(initAiFeature()).toEqual({ kind: "available" });
+    expect(initAiFeature()).toEqual({ kind: "available", cached: false });
   });
 
   it("writes the resolved status into aiStatusStore, not just the return value", async () => {
@@ -45,6 +45,25 @@ describe("initAiFeature (real config + real gpu detection)", () => {
     const { initAiFeature } = await import("./index");
     const { aiStatusStore } = await import("./status");
     initAiFeature();
-    expect(aiStatusStore.get()).toEqual({ kind: "available" });
+    expect(aiStatusStore.get()).toEqual({ kind: "available", cached: false });
+  });
+
+  it("keeps AI available and stores headroom when free space is low", async () => {
+    vi.stubGlobal("navigator", {
+      gpu: {},
+      storage: {
+        estimate: async () => ({ quota: 100_000_000, usage: 90_000_000 }),
+      },
+    });
+
+    const { initAiFeature, aiStorageHeadroomStore, aiModelApproxBytes } = await import("./index");
+    expect(initAiFeature()).toEqual({ kind: "available", cached: false });
+
+    await vi.waitFor(() => {
+      const headroom = aiStorageHeadroomStore.get();
+      expect(headroom).not.toBeNull();
+      expect(headroom?.ok).toBe(false);
+      expect(headroom?.required).toBe(aiModelApproxBytes * 1.2);
+    });
   });
 });

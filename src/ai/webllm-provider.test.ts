@@ -86,6 +86,17 @@ describe("WebLlmAiProvider", () => {
     await provider.dispose();
     expect(engine.unload).toHaveBeenCalledOnce();
   });
+
+  it("suggestMeta parses JSON embedded in the model stream", async () => {
+    const createEngine: CreateEngineFn = async () =>
+      createFakeEngine(['Sure: {"title":"Notatka","tags":["praca","pilne"]}']);
+    const provider = new WebLlmAiProvider({ modelId: "fake", createEngine });
+    await provider.init(() => undefined);
+    await expect(provider.suggestMeta("body")).resolves.toEqual({
+      title: "Notatka",
+      tags: ["praca", "pilne"],
+    });
+  });
 });
 
 describe("mapInitProgress", () => {

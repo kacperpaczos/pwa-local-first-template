@@ -5,6 +5,12 @@ import { createEntityId } from "../db/ids";
 import { resetLamportForTests } from "../db/lamport";
 import { RELAY_SYNC_META_ID, type SyncMeta } from "../db/sync-meta";
 
+/**
+ * `@tanstack/db` is fully mocked below (transactions become a trivial
+ * mutate-then-resolve, no real collection/persistence engine runs). This
+ * file verifies applyRemoteMutations' own merge/lamport/cursor logic, not
+ * TanStack DB or OPFS SQLite — those are only exercised for real in e2e.
+ */
 vi.mock("@tanstack/db", () => ({
   createTransaction: ({
     mutationFn,

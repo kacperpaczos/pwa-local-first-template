@@ -1,9 +1,14 @@
 import { expect, test } from "@playwright/test";
 import { createNote, uniqueTitle, waitForNotesReady } from "./helpers";
 
-test("without navigator.gpu, the app works fully and the AI panel stays hidden", async ({
-  page,
-}) => {
+async function waitForAiPage(page: import("@playwright/test").Page): Promise<void> {
+  await page.goto("/ai");
+  await expect(
+    page.getByTestId("ai-panel").or(page.getByTestId("ai-unavailable")),
+  ).toBeVisible({ timeout: 30_000 });
+}
+
+test("without navigator.gpu, notes work and AI stays unavailable", async ({ page }) => {
   await page.addInitScript(() => {
     Object.defineProperty(window.navigator, "gpu", {
       value: undefined,
@@ -17,25 +22,40 @@ test("without navigator.gpu, the app works fully and the AI panel stays hidden",
   const title = uniqueTitle("No-WebGPU note");
   await createNote(page, title);
   await expect(page.getByTestId("note-item").filter({ hasText: title })).toHaveCount(1);
+
+  // In-app navigation — avoid page.goto() remounting DbProvider / OPFS.
+  await page.getByRole("link", { name: "AI" }).click();
+  await expect(page.getByTestId("ai-unavailable")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId("ai-panel")).toHaveCount(0);
 });
 
-test("with stubbed navigator.gpu, the AI panel shows available status", async ({ page }) => {
+test("with stubbed navigator.gpu, the AI page shows available status", async ({ page }) => {
   await page.addInitScript(() => {
     Object.defineProperty(window.navigator, "gpu", {
-      value: {},
+      value: {
+        requestAdapter: async () => ({
+          limits: { maxBufferSize: 2 ** 30, maxStorageBufferBindingSize: 2 ** 30 },
+          info: { vendor: "mock", architecture: "mock" },
+        }),
+      },
       configurable: true,
     });
   });
 
-  await waitForNotesReady(page);
+  await waitForAiPage(page);
   await expect(page.getByTestId("ai-panel")).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByTestId("ai-status")).toContainText("dostępne");
+  await expect(page.getByTestId("ai-status")).toContainText("available");
 });
 
 test("mocked WebLLM download + summarize inference", async ({ page }) => {
   await page.addInitScript(() => {
     Object.defineProperty(window.navigator, "gpu", {
-      value: {},
+      value: {
+        requestAdapter: async () => ({
+          limits: { maxBufferSize: 2 ** 30, maxStorageBufferBindingSize: 2 ** 30 },
+          info: { vendor: "mock", architecture: "mock" },
+        }),
+      },
       configurable: true,
     });
 
@@ -45,8 +65,12 @@ test("mocked WebLLM download + summarize inference", async ({ page }) => {
         await new Promise((r) => setTimeout(r, 20));
         onProgress({ progress: 1, text: "mock ready" });
       },
+      async *chat(message: string) {
+        yield "Chat: ";
+        yield message.slice(0, 16);
+      },
       async *summarize(body: string) {
-        yield "Streszczenie: ";
+        yield "Summary: ";
         yield body.slice(0, 24);
       },
       async suggestMeta() {
@@ -59,20 +83,21 @@ test("mocked WebLLM download + summarize inference", async ({ page }) => {
     });
   });
 
-  await waitForNotesReady(page);
+  await waitForAiPage(page);
   await expect(page.getByTestId("ai-panel")).toBeVisible({ timeout: 30_000 });
 
   await page.getByTestId("ai-download").click();
-  await expect(page.getByTestId("ai-status")).toContainText("model gotowy", {
+  await expect(page.getByTestId("ai-status")).toContainText("model ready", {
     timeout: 15_000,
   });
 
-  await page.getByTestId("ai-summarize-input").fill(
-    "To jest długa notatka testowa do streszczenia przez mock WebLLM.",
-  );
+  await page.getByTestId("ai-mode-summarize").click();
+  const noteBody = "This is a long test note to summarize via mock WebLLM.";
+  await page.getByTestId("ai-summarize-input").fill(noteBody);
   await page.getByTestId("ai-summarize").click();
-  await expect(page.getByTestId("ai-summary-output")).toContainText("Streszczenie:", {
-    timeout: 15_000,
-  });
-  await expect(page.getByTestId("ai-status")).toContainText("model gotowy");
+  await expect(page.getByTestId("ai-summary-output")).toHaveText(
+    `Summary: ${noteBody.slice(0, 24)}`,
+    { timeout: 15_000 },
+  );
+  await expect(page.getByTestId("ai-status")).toContainText("model ready");
 });

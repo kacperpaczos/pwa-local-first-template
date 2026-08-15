@@ -1,12 +1,64 @@
 import { expect, type Browser, type BrowserContext, type Page } from "@playwright/test";
+import SEA from "gun/sea.js";
+import { exportSpaceKey, generateSpaceKey } from "../src/shared/crypto/envelope";
+import {
+  SPACE_ID_STORAGE_KEY,
+  SPACE_KEY_STORAGE_KEY,
+} from "../src/shared/identity/space";
+import { IDENTITY_STORAGE_KEY, type IdentityPayload, type SeaPair } from "../src/shared/identity/types";
 
-export const RELAY_CTRL = "http://127.0.0.1:8787";
+export const GUN_PEER_CTRL = "http://127.0.0.1:8765";
 
-export async function resetRelay(): Promise<void> {
-  const res = await fetch(`${RELAY_CTRL}/test/reset`, { method: "POST" });
+export async function resetGunPeer(): Promise<void> {
+  const res = await fetch(`${GUN_PEER_CTRL}/test/reset`, { method: "POST" });
   if (!res.ok) {
-    throw new Error(`relay reset failed: ${res.status} ${await res.text()}`);
+    throw new Error(`gun peer reset failed: ${res.status} ${await res.text()}`);
   }
+}
+
+/** @deprecated Use resetGunPeer */
+export const resetRelay = resetGunPeer;
+
+export type TestSpace = {
+  spaceId: string;
+  spaceKeyB64: string;
+};
+
+export async function generateTestIdentity(): Promise<IdentityPayload> {
+  const pair = (await SEA.pair()) as SeaPair;
+  return { v: 1, pair };
+}
+
+export async function generateTestSpace(): Promise<TestSpace> {
+  const key = await generateSpaceKey();
+  return {
+    spaceId: crypto.randomUUID(),
+    spaceKeyB64: await exportSpaceKey(key),
+  };
+}
+
+async function injectIdentity(
+  context: BrowserContext,
+  identity: IdentityPayload,
+  space?: TestSpace,
+): Promise<void> {
+  await context.addInitScript(
+    ({ identityKey, identityPayload, spaceIdKey, spaceKeyKey, spaceId, spaceKeyB64 }) => {
+      localStorage.setItem(identityKey, identityPayload);
+      if (spaceId && spaceKeyB64) {
+        localStorage.setItem(spaceIdKey, spaceId);
+        localStorage.setItem(spaceKeyKey, spaceKeyB64);
+      }
+    },
+    {
+      identityKey: IDENTITY_STORAGE_KEY,
+      identityPayload: JSON.stringify(identity),
+      spaceIdKey: SPACE_ID_STORAGE_KEY,
+      spaceKeyKey: SPACE_KEY_STORAGE_KEY,
+      spaceId: space?.spaceId ?? null,
+      spaceKeyB64: space?.spaceKeyB64 ?? null,
+    },
+  );
 }
 
 export async function waitForNotesReady(page: Page): Promise<void> {
@@ -50,14 +102,20 @@ export async function openTwoPeers(browser: Browser): Promise<{
   contextB: BrowserContext;
   pageA: Page;
   pageB: Page;
+  identity: IdentityPayload;
+  space: TestSpace;
 }> {
+  const identity = await generateTestIdentity();
+  const space = await generateTestSpace();
   const contextA = await browser.newContext();
   const contextB = await browser.newContext();
+  await injectIdentity(contextA, identity, space);
+  await injectIdentity(contextB, identity, space);
   const pageA = await contextA.newPage();
   const pageB = await contextB.newPage();
   await waitForNotesReady(pageA);
   await waitForNotesReady(pageB);
-  return { contextA, contextB, pageA, pageB };
+  return { contextA, contextB, pageA, pageB, identity, space };
 }
 
 export async function openTwoTabs(browser: Browser): Promise<{
@@ -91,16 +149,14 @@ type DbHarness = {
 };
 
 /**
- * Polls the collection (not a shared relay counter — other parallel e2e
- * projects push to the same relay, so a global entry count is not a
- * reliable proxy for "this note's own sync cycle finished"). Needed before
- * any full page navigation: a reload's own pullRemote() can otherwise race
- * a not-yet-pushed local write and clobber it with a stale echo.
+ * Polls the collection until this note's own sync cycle finished ($synced).
+ * Needed before full page navigation: a reload's pullRemote() can otherwise
+ * race a not-yet-pushed local write.
  */
 export async function waitForNoteSynced(
   page: Page,
   title: string,
-  timeout = 15_000,
+  timeout = 30_000,
 ): Promise<string> {
   await getDb(page);
   return page.evaluate(

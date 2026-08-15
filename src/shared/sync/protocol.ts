@@ -1,75 +1,75 @@
 import * as z from "zod/mini";
 import { noteSchema } from "../db/schemas";
+import { getEntitySchema, registerEntitySchema } from "./entity-registry";
+
+registerEntitySchema("notes", noteSchema);
+
+/** Current mutation wire protocol version (Gun SEA graph). */
+export const PROTOCOL_VERSION = 1;
+
+/** Inclusive lower bound of versions this client can ingest. */
+export const SUPPORTED_MIN_V = 1;
+
+/** Inclusive upper bound of versions this client can ingest. */
+export const SUPPORTED_MAX_V = 1;
+
+export function isSupportedProtocolVersion(v: number): boolean {
+  return Number.isInteger(v) && v >= SUPPORTED_MIN_V && v <= SUPPORTED_MAX_V;
+}
+
+export class ProtocolVersionError extends Error {
+  readonly name = "ProtocolVersionError";
+  readonly version: number;
+
+  constructor(version: number) {
+    super(
+      `Unsupported protocol version ${version} (supported ${SUPPORTED_MIN_V}–${SUPPORTED_MAX_V})`,
+    );
+    this.version = version;
+  }
+}
+
+export class UnknownEntityError extends Error {
+  readonly name = "UnknownEntityError";
+  readonly entity: string;
+
+  constructor(entity: string) {
+    super(`Unknown sync entity "${entity}"`);
+    this.entity = entity;
+  }
+}
 
 export const syncMutationSchema = z.object({
+  v: z.number(),
   idempotencyKey: z.string().check(z.minLength(1)),
-  entity: z.literal("notes"),
+  entity: z.string().check(z.minLength(1)),
   op: z.enum(["upsert", "soft_delete"]),
-  payload: noteSchema,
+  payload: z.unknown(),
 });
 
 export type ValidatedSyncMutation = z.infer<typeof syncMutationSchema>;
 
-export const clientPushMessageSchema = z.object({
-  type: z.literal("push"),
-  requestId: z.string(),
-  mutations: z.array(syncMutationSchema),
-});
-
-export const clientPullMessageSchema = z.object({
-  type: z.literal("pull"),
-  requestId: z.string(),
-  cursor: z.nullable(z.string()),
-});
-
-export const clientMessageSchema = z.union([
-  clientPushMessageSchema,
-  clientPullMessageSchema,
-]);
-
-export type ClientMessage = z.infer<typeof clientMessageSchema>;
-
-export const serverPushAckSchema = z.object({
-  type: z.literal("push_ack"),
-  requestId: z.string(),
-  accepted: z.array(z.string()),
-  rejected: z.array(
-    z.object({
-      idempotencyKey: z.string(),
-      reason: z.string(),
-    }),
-  ),
-});
-
-export const serverPullResultSchema = z.object({
-  type: z.literal("pull_result"),
-  requestId: z.string(),
-  cursor: z.nullable(z.string()),
-  mutations: z.array(syncMutationSchema),
-});
-
-export const serverErrorSchema = z.object({
-  type: z.literal("error"),
-  requestId: z.optional(z.string()),
-  message: z.string(),
-});
-
-export const serverMessageSchema = z.union([
-  serverPushAckSchema,
-  serverPullResultSchema,
-  serverErrorSchema,
-]);
-
-export type ServerMessage = z.infer<typeof serverMessageSchema>;
-
-export function parseClientMessage(data: unknown): ClientMessage {
-  return clientMessageSchema.parse(data);
-}
-
-export function parseServerMessage(data: unknown): ServerMessage {
-  return serverMessageSchema.parse(data);
-}
-
+/**
+ * Parse and validate a sync mutation. Missing `v` defaults to
+ * {@link PROTOCOL_VERSION} (local outbox). Versions outside
+ * {@link SUPPORTED_MIN_V}–{@link SUPPORTED_MAX_V} throw {@link ProtocolVersionError}.
+ */
 export function parseSyncMutation(data: unknown): ValidatedSyncMutation {
-  return syncMutationSchema.parse(data);
+  const input =
+    data !== null && typeof data === "object"
+      ? { v: PROTOCOL_VERSION, ...(data as Record<string, unknown>) }
+      : data;
+
+  const parsed = syncMutationSchema.parse(input);
+  if (!isSupportedProtocolVersion(parsed.v)) {
+    throw new ProtocolVersionError(parsed.v);
+  }
+
+  const entitySchema = getEntitySchema(parsed.entity);
+  if (!entitySchema) {
+    throw new UnknownEntityError(parsed.entity);
+  }
+  entitySchema.parse(parsed.payload);
+
+  return parsed;
 }

@@ -1,9 +1,9 @@
 import * as z from "zod/mini";
 
 /**
- * Skeleton contract for Faza 3 (WebLLM). No implementation lands until
- * Etap 3.1 — this file only fixes the shape so later stages (and the
- * mock-based adapter tests) can be written against a stable interface.
+ * Shared AI contracts for on-device WebLLM (chat, summarize, suggestMeta).
+ * Providers and the session layer implement this interface; UI and tests
+ * depend on these types rather than WebLLM specifics.
  */
 
 export type InitProgress = {
@@ -34,9 +34,10 @@ export function parseSuggestedMeta(data: unknown): SuggestedMeta {
 
 export interface AiProvider {
   init(onProgress: (progress: InitProgress) => void, signal?: AbortSignal): Promise<void>;
+  chat(message: string, opts?: GenOpts): AsyncIterable<string>;
   summarize(body: string, opts?: GenOpts): AsyncIterable<string>;
   suggestMeta(body: string): Promise<SuggestedMeta>;
-  answer(question: string, context: NoteChunk[]): AsyncIterable<string>;
+  answer(question: string, context: NoteChunk[], opts?: GenOpts): AsyncIterable<string>;
   dispose(): Promise<void>;
 }
 

@@ -1,0 +1,6 @@
+# Optional Caddy reverse proxy for TLS in front of gun-peer.
+# Uncomment the caddy service in compose.yaml to use this file.
+#
+# gun.example.com {
+#   reverse_proxy gun-peer:8765
+# }
