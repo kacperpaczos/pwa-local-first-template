@@ -2,38 +2,45 @@
 
 ## Unreleased
 
-### Changed — the demo domain is now a hello-world counter (ADR-012)
+### Changed: the demonstration domain is a counter (ADR-012)
 
-- **Notes, AI, and backup are removed**; the demo is one shared counter
-  (grow-only — concurrent increments SUM across devices and tabs) with an
-  LWW label. The domain-to-template line is now four files
-  ([vision.md §5](docs/vision.md#5-domain-split)). Removed with them:
-  `@mlc-ai/web-llm`, `loro-crdt`, and `@tanstack/offline-transactions`
-  (the op log has been the real outbox since ADR-010). Precache drops
-  ~9.4 MB → ~3.4 MB. `schemaVersion` 4 — clean break, notes-era tables are
-  not read.
-- **State is now derived, never written**: own ops append as unapplied and
-  the materializer recomputes state as a pure function of the op set —
-  immune to the multi-tab double-count/lost-delta hazards an incremental
-  fold has with delta payloads. Op-index re-reads merge flags monotonically
-  (a stale persisted read could previously re-queue a just-published op).
-- New foundational document [docs/vision.md](docs/vision.md): the
-  local-first/P2P commitments, layer cross-section, responsibility table,
-  protocol, dependency fates, and the staged road from zero to p2panda.
+- Notes, the AI layer, and the backup subsystem are removed. The
+  demonstration is one shared counter (grow-only; concurrent increments
+  are summed across devices and tabs) with a last-writer-wins label. The
+  boundary between the domain and the template is now four files
+  ([vision.md, section 6](docs/vision.md#6-domain-and-template-boundary)).
+  Removed with them: `@mlc-ai/web-llm`, `loro-crdt`, and
+  `@tanstack/offline-transactions` (the operation log has been the actual
+  outgoing queue since ADR-010). Precached assets drop from approximately
+  9.4 MB to approximately 3.4 MB. Schema version 4 is a clean break;
+  notes-era tables are not read.
+- State is derived, never written directly: operations append as
+  unapplied, and the materializer recomputes state as a pure function of
+  the operation set. This removes the multi-tab double-count and
+  lost-delta hazards that an incremental fold has with delta payloads.
+  Operation-index re-reads merge flags monotonically; a stale persisted
+  read could previously return a just-published operation to the queue.
+- New foundational document [docs/vision.md](docs/vision.md): definitions
+  and commitments, the layer cross-section, the responsibility table, the
+  protocol, dependency rationale, and the staged migration path to
+  p2panda. The remaining documentation (README, architecture, backlog,
+  gap list) is restructured around it with a uniform section order.
 
-### Direction
+### Changed: direction (ADR-011)
 
-- **The project now actively steers toward p2panda**
-  ([ADR-011](docs/adr/011-adopt-p2panda-direction.md)): the homegrown sync
-  stack is declared a bridge, not a destination, following the thin-client +
-  broker web path sketched by the p2panda maintainers (which this template's
-  architecture already matches). BACKLOG items whose designated fix is a
-  p2panda crate are labeled `[frozen — p2panda]` and will not be built
-  homegrown. A two-sided gap list for the upstream conversation ships as
-  [docs/p2panda-gaps.md](docs/p2panda-gaps.md), including a draft comment for
-  [p2panda#1235](https://github.com/p2panda/p2panda/issues/1235). Two new
-  audit findings (silent sync stall on an undecryptable relay row; per-row
-  flag writes) join the BACKLOG as the first code work in the queue.
+- The project actively steers toward p2panda
+  ([ADR-011](docs/adr/011-adopt-p2panda-direction.md)): the in-repository
+  synchronization stack is declared a bridge, following the thin-client
+  and broker web path described by the p2panda maintainers, which this
+  template's architecture already matches. Backlog items whose designated
+  fix is a p2panda crate are labelled `frozen — p2panda` and will not be
+  built in this repository. A gap list for the upstream conversation ships
+  as [docs/p2panda-gaps.md](docs/p2panda-gaps.md), including a draft
+  comment for
+  [p2panda#1235](https://github.com/p2panda/p2panda/issues/1235). Two
+  audit findings (a silent synchronization stall on an undecryptable relay
+  row; per-row flag writes) join the backlog as the first code work in the
+  queue.
 
 ### Added
 
@@ -44,8 +51,9 @@
   `node:sqlite`), which previously had no test at all. `integration` composes
   the real local stack (facade → outbox → op log → engine → materializer)
   into 2-3 virtual devices, covering the facade→log path that only e2e
-  touched, plus three-device convergence, restart-mid-cycle (closes BACKLOG
-  §11) and tombstone GC gated on real acknowledgements.
+  touched, plus three-device convergence, restart mid-cycle (closing the
+  backlog item on crashes between append and publish) and tombstone
+  garbage collection gated on real acknowledgements.
 - Shared test harness under `src/testing/harness/` (`FakeHub` extracted from
   `engine.test.ts`, `createVirtualDevice`, node:sqlite collections).
   Test-only and excluded from coverage.

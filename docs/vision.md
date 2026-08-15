@@ -1,227 +1,292 @@
-# Vision: local-first + P2P in a browser tab
+# Vision
 
-The base document for this repository. What we mean by local-first and P2P,
-what the architecture is, who is responsible for what, what we depend on and
-why, and the road from an empty page to p2panda. Decision history lives in
-[`adr/`](adr/); this document states the current position.
+## 1. Purpose
 
----
+This is the foundational document of the repository. It defines what
+local-first and peer-to-peer mean here, describes the architecture and the
+protocol, assigns responsibilities to modules, justifies every runtime
+dependency, marks the boundary between the template and the demonstration
+domain, and lays out the migration path to p2panda together with the
+reasoning behind it.
 
-## 1. What we are committing to
-
-**Local-first** here is four testable commitments, not a mood:
-
-1. **The user's device holds the source of truth.** Full state lives in
-   SQLite inside the browser (OPFS). No server can withhold, edit, or lose
-   the user's data, because no server has it.
-2. **Offline is not a degraded mode.** Every feature works with the network
-   cable cut; sync is a background concern that catches up later.
-3. **Writes are durable before they are shared.** A click is recorded in a
-   local, append-only log before any network is involved. A crash or
-   an offline week loses nothing.
-4. **Concurrent edits merge deterministically.** Two devices editing at
-   once converge to the same state without a coordinator and without asking
-   the user to pick a winner (they can inspect what merged in the conflict
-   history).
-
-**P2P** in a browser is a constrained claim and we state the constraint
-up front: a browser tab cannot accept inbound connections, so true
-device-to-device transport is not available to a web app today. The honest
-browser shape — the same one the p2panda maintainers describe for the web —
-is a **thin client + dumb relay**: devices sign and store everything
-locally and exchange **end-to-end-encrypted** payloads through a relay that
-cannot read, forge, or selectively alter them (every op is signed and
-hash-chained; content is AES-GCM sealed under a key only paired devices
-hold). The relay is a courier, not a party. No account, no server-side
-state worth stealing, any relay instance is replaceable.
-
-**Research focus.** The repo is a template and a test-bed, not a product.
-The demo domain is deliberately a hello-world — one counter, one label
-(see [§5](#5-domain-split)) — so that everything else in the tree IS the
+Decision history lives in [`adr/`](adr/); this document states the current
+position. The repository is a template and a research vehicle, not a
+product. The demonstration domain is intentionally minimal — one counter,
+one label (section 6) — so that everything else in the tree constitutes the
 template.
 
-## 2. Architecture — the layer cross-section
+## 2. Definitions and commitments
 
-What happens between a click and another device, top to bottom. Every layer
-is a module with a seam; the table in §3 says who owns what.
+### 2.1 Local-first
+
+Local-first is defined here as four verifiable commitments:
+
+1. **The user's device holds the source of truth.** Complete application
+   state is stored in SQLite inside the browser, in the Origin Private File
+   System (OPFS). No server holds the data; consequently, no server can
+   withhold, edit, or lose it.
+2. **Offline operation is not a degraded mode.** Every feature works
+   without network connectivity. Synchronization is a background process
+   that reconciles state when connectivity returns.
+3. **Writes are durable before they are shared.** Every change is recorded
+   in a local, append-only operation log before any network activity takes
+   place. A crash, or an arbitrarily long offline period, loses no data.
+4. **Concurrent edits merge deterministically.** Devices editing
+   concurrently converge to the same state without a coordinator and
+   without asking the user to choose a winner. Merges that discarded a
+   value are recorded in a local conflict history for inspection.
+
+### 2.2 Peer-to-peer in a browser
+
+A browser tab cannot accept inbound connections, so direct
+device-to-device transport is not available to a web application. The
+practical architecture for the web — the same one the p2panda maintainers
+describe in [p2panda#1235](https://github.com/p2panda/p2panda/issues/1235)
+— is a thin client with a relay:
+
+- each device signs and stores everything locally;
+- devices exchange end-to-end encrypted operations through a relay;
+- the relay cannot read, forge, or selectively alter the operations,
+  because every operation is signed and hash-chained, and payload content
+  is sealed with AES-GCM under a key held only by paired devices.
+
+The relay is therefore a courier, not a participant. It requires no
+account, holds no state worth stealing, and any instance of it is
+replaceable.
+
+## 3. Architecture overview
+
+The following cross-section traces one write from a click to another
+device. Each layer is a module with a defined seam; section 4 assigns
+ownership.
 
 ```text
   click "+1"
-    │
+    |
  1  UI (Solid)                    reads one live-queried state row
-    │  facade.increment()
- 2  PersistenceFacade             the ONLY write API the UI sees
-    │  append {kind:"increment"}
- 3  OpLogStore                    signs the op (device ed25519), chains it
-    │                             (blake3 backlink, seq n+1), writes it
-    │                             durably — under a cross-tab Web Lock
- 4  Materializer                  recomputes the state row FROM the log:
-    │                             value = Σ increments, label = LWW max
-    │                             (pure function of the op set)
- 5  SyncEngine                    background: publishes unpublished ops,
-    │                             observes remote log heads, fetches gaps
- 6  LogSyncTransport              the wire seam. Today: GunLogTransport
-    │                             (AES-GCM sealed payloads on a Gun graph)
- 7  Relay (server/gun-peer)       dumb, zero-knowledge, replaceable
-    │
-    ▼  ...the same stack, mirrored, on every other paired device:
-       fetch → verify signature + chain → ingest → materialize → UI
+    |  facade.increment()
+ 2  PersistenceFacade             the only write API visible to the UI
+    |  append {kind:"increment"}
+ 3  OpLogStore                    signs the operation with the device
+    |                             Ed25519 key, chains it (BLAKE3 backlink,
+    |                             sequence n+1), writes it durably under a
+    |                             cross-tab Web Lock
+ 4  Materializer                  recomputes the state row from the log:
+    |                             value = sum of increments, label =
+    |                             last-writer-wins maximum; a pure function
+    |                             of the operation set
+ 5  SyncEngine                    background: publishes unpublished
+    |                             operations, observes remote log heads,
+    |                             fetches missing ranges
+ 6  LogSyncTransport              the wire seam; currently GunLogTransport
+    |                             (AES-GCM sealed payloads on a Gun graph)
+ 7  Relay (server/gun-peer)       zero-knowledge, replaceable
+    |
+    v  the same stack, mirrored, on every other paired device:
+       fetch -> verify signature and chain -> ingest -> materialize -> UI
 ```
 
-Key structural facts:
+Three structural facts carry most of the design:
 
-- **The log is the outbox.** Each op carries a `published` flag; a crash
-  between append and publish leaves the op queued, and the next cycle ships
-  it. There is no second queue.
-- **State is derived, never written.** The state row is a pure function of
-  the op set. That makes materialization idempotent and order-free, which is
-  what lets any interleaving of devices, tabs, and retries converge
-  ([ADR-012](adr/012-counter-hello-world.md) records why this is load-bearing).
-- **One log per (entity, device).** Sync is per-device log-height exchange:
-  announce heads, fetch missing ranges, validate the hash chain, quarantine
-  what cannot be decoded — one poison op never wedges the pipeline
+- **The log is the outgoing queue.** Each operation carries a `published`
+  flag. A crash between append and publish leaves the operation queued,
+  and the next synchronization cycle ships it. There is no second queue.
+- **State is derived, never written directly.** The state row is a pure
+  function of the operation set, which makes materialization idempotent
+  and order-independent. This is what allows any interleaving of devices,
+  tabs, and retries to converge;
+  [ADR-012](adr/012-counter-hello-world.md) records why this property is
+  load-bearing.
+- **One log per entity and device.** Synchronization is an exchange of log
+  heights: announce heads, fetch missing ranges, validate the hash chain,
+  and quarantine what cannot be decoded, so that a single malformed
+  operation never blocks the pipeline
   ([ADR-010](adr/010-per-device-op-log.md)).
 
-## 3. Responsibilities
+## 4. Responsibilities and trust boundary
 
-| Module | Owns | Must never |
+| Module | Owns | Must not |
 | --- | --- | --- |
-| `features/counter` (UI) | rendering, input handling | touch storage or sync directly |
-| `shared/db/facade.ts` | the write API (`increment`, `setLabel`), Lamport stamping | expose log/sync internals to the UI |
+| `features/counter` | rendering and input handling | touch storage or synchronization directly |
+| `shared/db/facade.ts` | the write API (`increment`, `setLabel`), Lamport stamping | expose log or synchronization internals to the UI |
 | `shared/db/client.ts` | wiring: collections, store, engine, entity name | contain domain rules |
-| `shared/oplog/` | op header format, signing, hash-chain rules, payload schema registry | know about transports or UI |
-| `shared/store/oplog-store.ts` | durable append/ingest, seq derivation under locks, read index | interpret payloads |
-| `shared/store/materialize.ts` | folding ops into state (the merge policy lives here) | talk to the network |
-| `shared/sync/engine.ts` | cycle orchestration: flush, pull, acks, status | parse or trust payload content |
-| `shared/sync/gun-log-transport.ts` | moving sealed bytes; wire layout on Gun | see plaintext (it seals/opens at the boundary, keyed by identity) |
-| `shared/identity/` | SEA pair (relay auth), device ed25519 key, space key, pairing, BIP39 recovery | leave the module (device secret key never transfers) |
+| `shared/oplog/` | operation header format, signing, hash-chain rules, payload schema registry | depend on transports or the UI |
+| `shared/store/oplog-store.ts` | durable append and ingest, sequence derivation under locks, the read index | interpret payload content |
+| `shared/store/materialize.ts` | folding operations into state; the merge policy | perform network activity |
+| `shared/sync/engine.ts` | cycle orchestration: flush, pull, acknowledgements, status | parse or trust payload content |
+| `shared/sync/gun-log-transport.ts` | moving sealed bytes; the wire layout on Gun | observe plaintext beyond the sealing boundary |
+| `shared/identity/` | relay credential pair, device Ed25519 key, space key, pairing, BIP39 recovery | allow the device secret key to leave the module |
 | `server/gun-peer` | relaying encrypted rows | any application logic |
 
-The **trust boundary**: everything below the transport seam is untrusted.
-Signatures + hash chains make the log tamper-evident; the space key makes
-content unreadable; chain validation (`ok / gap / duplicate / fork`) makes
-reordering and replay detectable.
+The trust boundary lies at the transport seam: everything below it is
+untrusted. Signatures and hash chains make the log tamper-evident; the
+space key makes content unreadable to the relay; chain validation (with
+verdicts `ok`, `gap`, `duplicate`, `fork`) makes reordering and replay
+detectable.
 
-## 4. Protocol
+## 5. Protocol
 
-Three layers, separable on purpose:
+The protocol has three layers, separated deliberately.
 
-**Operation** (`shared/oplog/header.ts`) — the unit of change:
+### 5.1 Operation
+
+The unit of change (`shared/oplog/header.ts`):
 
 ```ts
 header = { v: 3, publicKey, entity, seq, backlink, timestamp, payloadHash, payloadSize }
 op     = { hash: blake3(header), header, signature: ed25519(header) }
 ```
 
-`seq` is 1-based height in this device's log for this entity; `backlink` is
-the previous op's hash (null at seq 1); `timestamp` is advisory only — merge
-decisions never read wall clocks.
+`seq` is the one-based height in the device's log for the given entity.
+`backlink` is the hash of the previous operation and is null only at
+sequence one. `timestamp` is advisory; merge decisions never read wall
+clocks.
 
-**Payload** (`shared/oplog/payload.ts`) — per-entity, schema-validated,
-carried as sealed bytes. The demo entity registers two kinds:
-`{kind:"increment", amount}` and `{kind:"set_label", label, lamport}`.
-Payloads are deltas; the materializer gives them meaning.
+### 5.2 Payload
 
-**Wire** (`shared/sync/protocol.ts`, `gun-log-transport.ts`) — flat rows on
-the relay, ciphertext only:
+Payloads (`shared/oplog/payload.ts`) are validated per entity against a
+registered schema and carried as sealed bytes. The demonstration entity
+registers two kinds: `{kind: "increment", amount}` and `{kind:
+"set_label", label, lamport}`. Payloads are deltas; the materializer gives
+them meaning.
+
+### 5.3 Wire
+
+The wire layout (`shared/sync/protocol.ts`, `gun-log-transport.ts`)
+consists of flat rows on the relay, containing ciphertext only:
 
 ```text
-app_oplog/<entity>/logs/<device>/<seq> → signed header fields + AES-GCM ciphertext
-app_oplog/<entity>/heads/<device>      → { seq, hash }     (monotone announce)
-app_oplog/<entity>/acks/<device>       → { json }          (seen-up-to per peer)
+app_oplog/<entity>/logs/<device>/<seq> -> signed header fields plus AES-GCM ciphertext
+app_oplog/<entity>/heads/<device>      -> { seq, hash }   monotone head announcement
+app_oplog/<entity>/acks/<device>       -> { json }        acknowledged height per peer
 ```
 
-Sync cycle: publish own unpublished ops (rows before head, so an announced
-head never points above a hole) → for each remote head above our local
-height, range-fetch → verify + chain-validate → ingest → materialize →
-publish acks. Every op carries `v`; an unsupported version degrades status
-to `outdated` for that cycle without latching.
+A synchronization cycle proceeds as follows: publish own unpublished
+operations (rows before the head announcement, so that an announced head
+never points above a missing row); for each remote head above the local
+height, fetch the missing range; verify signatures and chain positions;
+ingest; materialize; publish acknowledgements. Every operation carries a
+version field; an unsupported version degrades the status to `outdated`
+for that cycle without latching.
 
-## 5. Domain split
+## 6. Domain and template boundary
 
-The line between **template** (keep, reuse) and **demo domain** (replace
-with your product) is exactly four files:
+The boundary between the template (to be kept) and the demonstration
+domain (to be replaced by a product) is exactly four files:
 
-| Demo domain (replace) | With your own |
+| Demonstration domain | Replace with |
 | --- | --- |
-| `shared/db/schemas.ts` | your entity row schema |
-| `shared/oplog/payload.ts` (the registered schema) | your op kinds |
-| `shared/store/materialize.ts` | your merge policy (how ops fold into state) |
-| `features/counter/` | your UI |
+| `shared/db/schemas.ts` | the product's entity row schema |
+| `shared/oplog/payload.ts` (the registered schema) | the product's operation kinds |
+| `shared/store/materialize.ts` | the product's merge policy |
+| `features/counter/` | the product's UI |
 
 Everything else — log, store, engine, transport, identity, settings — is
-domain-blind. The counter was chosen because it is the smallest domain that
-still proves the machinery: a grow-only counter (concurrent writes **sum**)
-and an LWW register (concurrent writes **pick one winner, deterministically**)
-are the two primitive merge strategies; a real product composes them (and
-richer CRDTs — collaborative text would return here as a Loro/Yjs document
-payload with delta ops, which is exactly what the notes-era version did).
+domain-independent.
 
-## 6. Dependencies — what, why, and its fate
+The counter was chosen because it is the smallest domain that still proves
+the machinery. A grow-only counter (concurrent writes are summed) and a
+last-writer-wins register (concurrent writes resolve to one deterministic
+winner) are the two primitive merge strategies; a product domain composes
+them and may add richer conflict-free replicated data types. Collaborative
+text, which the notes-era version of this repository implemented with
+Loro, would return as a document-delta operation kind folded in the
+materializer.
 
-Runtime dependencies are liabilities; each one is listed with the reason it
-earns its place and what happens to it on the p2panda road (§7):
+## 7. Dependencies
 
-| Dependency | Why it is here | Fate |
+Each runtime dependency is listed with the reason it is present and its
+fate on the migration path of section 8.
+
+| Dependency | Reason | Fate |
 | --- | --- | --- |
-| `solid-js` (+ router, Kobalte/SolidUI, Tailwind) | UI. Thin, replaceable, no sync coupling | stays (yours to swap) |
-| `@tanstack/db` + `browser-db-sqlite-persistence` | typed collections over SQLite/OPFS, cross-tab coordination | stays; behind `OpLogPersistence` + facade seams |
-| `gun` (+ SEA) | the relay transport that works in a browser today; SEA authenticates graph writes | **replaced** by a p2panda broker client at the `LogSyncTransport` seam |
-| `@noble/curves`, `@noble/hashes` | ed25519 signatures, blake3 hashes — the op format | **replaced** by `p2panda-core` (same primitives) |
-| `@scure/bip39` | recovery phrase for the space key | replaced alongside `p2panda-encryption` |
-| `zod` | payload/schema validation at trust boundaries | stays |
-| `nanostores` | tiny UI-visible state (sync status) | stays |
-| `qrcode` | pairing payload display | stays until `p2panda-auth` pairing |
+| `solid-js`, router, Kobalte, Tailwind | the UI layer; no coupling to synchronization | remains; replaceable by the user |
+| `@tanstack/db`, `@tanstack/browser-db-sqlite-persistence` | typed collections over SQLite in OPFS; cross-tab coordination | remains, behind the `OpLogPersistence` port and the facade |
+| `gun` (with SEA) | the relay transport available in a browser today; SEA authenticates graph writes | replaced by a p2panda broker client at the `LogSyncTransport` seam |
+| `@noble/curves`, `@noble/hashes` | Ed25519 signatures and BLAKE3 hashes for the operation format | replaced by `p2panda-core`, which uses the same primitives |
+| `@scure/bip39` | recovery phrase for the space key | replaced together with `p2panda-encryption` |
+| `zod` | schema validation at trust boundaries | remains |
+| `nanostores` | minimal UI-visible state, such as the synchronization status | remains |
+| `qrcode` | rendering the pairing payload | remains until pairing moves to `p2panda-auth` |
 
-Dev-side, the four-layer Vitest suite + Playwright are described in
-[architecture.md](architecture.md#test-layers).
+The test tooling (four Vitest layers and Playwright) is described in
+[architecture.md, section 5](architecture.md#5-test-layers).
 
-## 7. The road from zero to p2panda — and why each step
+## 8. Migration path to p2panda
 
-The template's history is a staged argument; each stage exists because the
-previous one fails a specific test. This is also the order in which you
-would rebuild it — or evaluate any other local-first stack.
+The repository's history is a staged argument. Each stage exists because
+the previous one fails a specific requirement; the sequence is also the
+order in which one would rebuild the system or evaluate an alternative
+stack.
 
-- **Stage 0 — local state.** A collection over SQLite/OPFS. *Why:*
-  commitment 1 and 2 (source of truth on device, offline whole). Fails at:
-  a second device.
-- **Stage 1 — an append-only op log under every write.** *Why:* syncing
-  snapshots loses concurrent edits and cannot say "what changed since X";
-  a log gives durable writes (commitment 3), history, and a sync unit.
-  Fails at: trusting the network.
-- **Stage 2 — sign and hash-chain each device's log.** *Why:* the transport
-  will be someone else's computer. Signatures make authorship real
-  (a peer cannot spoof another device's changes); backlinks make gaps,
-  forks and tampering detectable. Fails at: privacy.
-- **Stage 3 — seal payloads, dumb relay.** *Why:* a browser cannot do
-  device-to-device, so a relay is unavoidable — then it must be blind.
-  AES-GCM under a paired-devices key, AAD-bound to the signed header:
-  the relay moves envelopes it cannot open. Fails at: efficiency.
-- **Stage 4 — log-height sync.** *Why:* replaying everything on every boot
-  grows with history. Head announcements + range fetch + acks make cost
-  proportional to what actually changed. Fails at: meaning.
-- **Stage 5 — deterministic materialization.** *Why:* ops need a merge
-  policy to become state. Make state a pure function of the op set (sum,
-  LWW max) and convergence stops being a protocol property and becomes
-  arithmetic (commitment 4). Fails at: humans having several devices.
-- **Stage 6 — identity and pairing.** *Why:* "my devices" must mean
-  something: per-device signing keys (never transferred), a shared space
-  key moved by QR/JSON pairing, BIP39 recovery. Known, documented holes:
-  the pairing checksum authenticates nothing, no revocation, no forward
-  secrecy ([BACKLOG](BACKLOG.md) §1–§3).
-- **Stage 7 — hand the fabric to p2panda.** *Why:* stages 1–6 are
-  ~2k lines of homegrown sync code whose every audit finding lived below
-  the facade — and p2panda ships the same shapes as maintained crates,
-  including the auth/encryption layers that close the Stage-6 holes
-  properly (`p2panda-auth`, `p2panda-encryption`). Our op format is
-  deliberately p2panda-shaped so this is a module swap, not a rewrite:
-  the mapping is [ADR-010](adr/010-per-device-op-log.md)'s table, the path
-  (thin wasm client + broker) is [ADR-011](adr/011-adopt-p2panda-direction.md),
-  and the concrete two-sided gap list is
-  [p2panda-gaps.md](p2panda-gaps.md). Until those gaps close, nothing that
-  a p2panda crate would replace gets built here (the BACKLOG's
-  `[frozen — p2panda]` label).
+**Stage 0 — local state.** A collection over SQLite in OPFS.
+Motivation: commitments 1 and 2 — the source of truth on the device and
+full offline operation. Insufficient as soon as a second device exists.
 
-What survives Stage 7 on our side is exactly §5's domain line plus the UI —
-which is the definition of a good template: the part you keep is the part
-that was yours.
+**Stage 1 — an append-only operation log under every write.**
+Motivation: synchronizing snapshots loses concurrent edits and cannot
+answer what changed since a given point. A log provides durable writes
+(commitment 3), history, and a unit of synchronization. Insufficient as
+soon as the network is untrusted.
+
+**Stage 2 — signing and hash-chaining each device's log.**
+Motivation: the transport is someone else's computer. Signatures make
+authorship verifiable, so a peer cannot forge another device's changes;
+backlinks make gaps, forks, and tampering detectable. Insufficient for
+privacy.
+
+**Stage 3 — sealed payloads and a zero-knowledge relay.**
+Motivation: a browser cannot connect device to device, so a relay is
+unavoidable; it must therefore be blind. AES-GCM under a key held by
+paired devices, with additional authenticated data binding the ciphertext
+to the signed header, means the relay moves envelopes it cannot open.
+Insufficient for efficiency.
+
+**Stage 4 — log-height synchronization.**
+Motivation: replaying the full history on every start grows without
+bound. Head announcements, range fetches, and acknowledgements make the
+cost proportional to what actually changed. Insufficient without merge
+semantics.
+
+**Stage 5 — deterministic materialization.**
+Motivation: operations need a merge policy to become state. Defining
+state as a pure function of the operation set (a sum, and a
+last-writer-wins maximum) turns convergence from a protocol property into
+arithmetic, which satisfies commitment 4. Insufficient once a person owns
+several devices.
+
+**Stage 6 — identity and pairing.**
+Motivation: "my devices" must be a verifiable notion. Each device holds a
+signing key that never leaves it; a shared space key is moved by QR or
+JSON payload during pairing; a BIP39 phrase allows recovery. The known
+and documented gaps of this stage are the pairing checksum, the absence
+of revocation, and the absence of forward secrecy
+([BACKLOG](BACKLOG.md), items 2.1 to 2.3).
+
+**Stage 7 — replacing the fabric with p2panda.**
+Motivation: stages 1 to 6 amount to roughly two thousand lines of
+in-repository synchronization code, and every finding of the August 2026
+audit was located in that code. p2panda provides the same structures as
+maintained crates, including the authorization and encryption layers
+(`p2panda-auth`, `p2panda-encryption`) that close the stage-6 gaps
+properly. The operation format here was shaped after p2panda's from the
+start, so the migration is a module replacement rather than a rewrite:
+the module-to-crate mapping is in
+[ADR-010](adr/010-per-device-op-log.md), the chosen path (thin
+WebAssembly client plus broker) is in
+[ADR-011](adr/011-adopt-p2panda-direction.md), and the concrete gap list
+on both sides is in [p2panda-gaps.md](p2panda-gaps.md). Until those gaps
+close, nothing that a p2panda crate would replace is built here; the
+affected backlog items carry the label `frozen — p2panda`.
+
+After stage 7, what remains in this repository is the domain boundary of
+section 6 and the UI — which is the intended definition of the template.
+
+## 9. Related documents
+
+- [architecture.md](architecture.md) — layer diagram, replacement points,
+  test layers, invariants
+- [adr/](adr/) — decision records
+- [BACKLOG.md](BACKLOG.md) — open work, labelled by fate
+- [p2panda-gaps.md](p2panda-gaps.md) — the gap list for the upstream
+  conversation
