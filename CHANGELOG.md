@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Direction
+
+- **The project now actively steers toward p2panda**
+  ([ADR-011](docs/adr/011-adopt-p2panda-direction.md)): the homegrown sync
+  stack is declared a bridge, not a destination, following the thin-client +
+  broker web path sketched by the p2panda maintainers (which this template's
+  architecture already matches). BACKLOG items whose designated fix is a
+  p2panda crate are labeled `[frozen — p2panda]` and will not be built
+  homegrown. A two-sided gap list for the upstream conversation ships as
+  [docs/p2panda-gaps.md](docs/p2panda-gaps.md), including a draft comment for
+  [p2panda#1235](https://github.com/p2panda/p2panda/issues/1235). Two new
+  audit findings (silent sync stall on an undecryptable relay row; per-row
+  flag writes) join the BACKLOG as the first code work in the queue.
+
 ### Added
 
 - **Two new test layers** (`docs/architecture.md#test-layers`). `contract`

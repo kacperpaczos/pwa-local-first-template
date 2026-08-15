@@ -45,6 +45,17 @@ flowchart TB
 | Domain (notes → other) | schemas + facade + features + op payload schema | [`src/shared/db/schemas.ts`](../src/shared/db/schemas.ts), [`src/shared/oplog/payload.ts`](../src/shared/oplog/payload.ts), [`src/features/`](../src/features/) |
 | Identity / space crypto | SEA pair + per-device signing key + space key | [`src/shared/identity/`](../src/shared/identity/), [`src/shared/crypto/`](../src/shared/crypto/) |
 
+### Where the swaps are headed
+
+Since [ADR-011](adr/011-adopt-p2panda-direction.md) these seams have a named
+destination: the sync mesh, op-log storage, and identity/crypto rows map to
+p2panda crates along the thin-client + broker path (module→crate table in
+[ADR-010](adr/010-per-device-op-log.md); note ADR-011's errata — p2panda's
+wire encoding is Postcard since v0.7, not CBOR). What blocks each swap, on
+both sides, is tracked in [p2panda-gaps.md](p2panda-gaps.md). Homegrown
+replacements for the frozen seams are deliberately out of scope — see the
+labels in [BACKLOG.md](BACKLOG.md).
+
 ## Test layers
 
 Each Vitest project is a layer, and the layer — not a comment in the file —

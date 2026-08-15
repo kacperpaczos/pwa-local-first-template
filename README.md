@@ -2,6 +2,28 @@
 
 A local-first progressive web app template for offline-capable, multi-device document apps in the browser. The demo product is a notes app; the architecture is reusable for other entity-based local-first products.
 
+## Status & direction
+
+**Where the project is (v0.1.0):** a working, tested browser-only stack.
+Notes live in SQLite in the browser (OPFS) and the app is fully functional
+offline; every change is signed by a per-device key and appended to that
+device's hash-linked log; devices exchange logs as end-to-end-encrypted
+payloads through a dumb relay that cannot read them; concurrent edits merge
+deterministically (last-writer-wins fields + CRDT text). Verified by four
+layers of Vitest suites plus Playwright e2e (two real browsers syncing
+through a real relay; two tabs sharing one database).
+
+**Where it is going ([ADR-011](docs/adr/011-adopt-p2panda-direction.md)):**
+the homegrown sync stack is a *bridge*, not a destination. The project
+actively steers toward [p2panda](https://p2panda.org/) along the path its
+maintainers describe for the web — a thin signing client in the browser plus
+a broker relay — which is the architecture this template already implements.
+Work that a p2panda crate would replace (bespoke ACLs, group encryption, log
+compaction) is deliberately frozen; the concrete two-sided gap list for the
+upstream conversation is [docs/p2panda-gaps.md](docs/p2panda-gaps.md)
+(ref: [p2panda#1235](https://github.com/p2panda/p2panda/issues/1235),
+[p2panda#1126](https://github.com/p2panda/p2panda/issues/1126)).
+
 ---
 
 ## Purpose
@@ -27,6 +49,8 @@ Serious P2P engines exist — [p2panda](https://p2panda.org/), [iroh](https://ww
 - Holepunch/Pear's Hypercore stack is production-proven, but targets the Pear/Bare runtime, not a standard browser tab.
 
 So the gap this template fills is specifically: **browser-only, no backend server, real P2P mesh, real local persistence.** Gun and Trystero are the realistic transports for that today; the native engines above are the likely future once one of them ships a real browser story. The [transport boundary](#8-sync-transport) is designed so that swap is contained, not a rewrite.
+
+Since August 2026 this is no longer passive waiting. The p2panda maintainers have sketched their intended web architecture ([p2panda#1235](https://github.com/p2panda/p2panda/issues/1235)): a thin WASM/JS client that signs and stores locally, syncing through a broker node that only ever sees end-to-end-encrypted data — which is precisely the architecture this template ships today (browser signs + stores, Gun relay carries ciphertext only). [ADR-011](docs/adr/011-adopt-p2panda-direction.md) commits the project to that path, and [docs/p2panda-gaps.md](docs/p2panda-gaps.md) lists what is missing on each side to get there.
 
 ---
 
@@ -93,7 +117,7 @@ p2panda is a different kind of thing than this template — it's a modular **eng
 | 1 | UI | Solid notes / settings / AI (`src/features/`) | Bring your own | No overlap — out of scope for p2panda by design |
 | 2 | Local persistence | OPFS SQLite materialized from a **per-device append-only operation log**, behind `PersistenceFacade` + `OpLogStore` (`src/shared/db/`, `src/shared/store/`) | Append-only signed **operation log**, materialized into views | Same shape now: full-state payloads vs. p2panda's deltas is the remaining difference, and a deliberate v0.1 simplification (see ADR-010) |
 | 3 | Outbox / offline writes | `@tanstack/offline-transactions` queues local writes; the log's `published` flag is itself the durable outbox | Not a distinct concept — operations are written straight to your own log | Converged: local writes append to the log first (durable), then publish — this template no longer treats "local commit" and "on the log" as different moments |
-| 4 | Wire protocol | Versioned envelope wrapping a signed, hash-linked op header + ciphertext, entity-agnostic via a payload schema registry (`protocol.ts`, `oplog/header.ts`, `oplog/payload.ts`) | Signed `Operation` (key + signature + body), hash-linked into a log | Structurally aligned: both are a signed, hash-linked unit in an append-only per-author log. Encoding differs (sorted-key JSON vs. CBOR/Postcard) — a mechanical swap, not a redesign |
+| 4 | Wire protocol | Versioned envelope wrapping a signed, hash-linked op header + ciphertext, entity-agnostic via a payload schema registry (`protocol.ts`, `oplog/header.ts`, `oplog/payload.ts`) | Signed `Operation` (key + signature + body), hash-linked into a log | Structurally aligned: both are a signed, hash-linked unit in an append-only per-author log. Encoding differs (sorted-key JSON vs. Postcard — p2panda dropped CBOR in v0.7, see [ADR-011](docs/adr/011-adopt-p2panda-direction.md) errata) — a mechanical swap, not a redesign |
 | 5 | Content encryption | AES-256-GCM "space key" shared by paired devices, BIP39-wrapped for recovery (`shared/crypto/envelope.ts`, `shared/identity/space.ts`, `recovery.ts`) | `p2panda-encryption` — decentralised group encryption with post-compromise security and optional forward secrecy, CRDT-based membership | p2panda's scheme is strictly more advanced (real revocation, forward secrecy); this template's single shared key has neither yet — see [caveats](#known-caveats) |
 | 6 | Identity | Per-device ed25519 keypair signs every op directly (op attribution); a separate shared Gun SEA pair authenticates the transport graph; the space key is the content secret (`shared/identity/`) | Ed25519 keypair signs every operation directly — identity and content authenticity are the same mechanism | Op attribution now matches p2panda's model (ed25519 signs the op); transport auth is still a separate, shared secret — a real Gun replacement (layer 8) would let this collapse further |
 | 7 | Conflict resolution | Fixed policy: LWW (Lamport clocks) for scalar fields, Loro CRDT for body text, applied while materializing the log (`materialize.ts`, `merge-note.ts`, `crdt.ts`) | Bring your own CRDT — the log format is CRDT-compatible but doesn't mandate one | Same "pluggable, not prescriptive" philosophy, applied at different granularity (whole-entity here vs. raw op-log there) |
@@ -237,7 +261,7 @@ Notes for e2e:
 - Device revocation and key rotation — the device roster (Settings) shows who has synced, but there's no way to revoke one
 - Real forward secrecy / post-compromise security for content encryption — `p2panda-encryption` solves this today, this template's single shared key does not (see layer 5 above)
 - Op log compaction / pruning — full-state payloads mean log size grows with edit count; no compaction ships in v0.1 (see [ADR-010](docs/adr/010-per-device-op-log.md))
-- p2panda/iroh as a future transport: no official browser/WASM binding exists yet for the current (post-rewrite) p2panda architecture — revisit when either ships a stable one, not on a fixed timeline (see [Purpose](#purpose), ADR-005, ADR-010's v0.2 mapping table)
+- p2panda adoption ([ADR-011](docs/adr/011-adopt-p2panda-direction.md)): the chosen path is a thin browser client + broker (not p2panda-net-in-wasm); what blocks it — on their side a wasm client API and host-pluggable storage, on ours the header-encoding and trust-model swaps — is itemized in [docs/p2panda-gaps.md](docs/p2panda-gaps.md)
 - Safari / non-Chromium hosts, or a native shell if OPFS remains limiting
 - Maturity of `@tanstack/browser-db-sqlite-persistence` (facade allows swap)
 - Longer-term schema evolution beyond current `schemaVersion` / backup schema
@@ -251,7 +275,7 @@ Notes for e2e:
 - The OPFS database file is not precached by the service worker. Loro WASM (~3 MB) and related workers use runtime `CacheFirst`.
 - All persisted collections (`notes`, `oplog_ops`, `oplog_heads`) must use the **same** `schemaVersion`.
 - QR/JSON pairing payload contains private key material (SEA pair, space key) — handle it like a password. Device signing keys are the one thing pairing never transfers.
-- **The 6-digit pairing SAS is a transfer checksum, not authentication.** It catches a mistyped, truncated, or wrong-device code. It does *not* stop an attacker who can rewrite the pairing channel: the digits are only 10^6 wide over inputs the payload's author chooses, so a forged payload can be ground offline in well under a second to display the same digits the genuine device shows (demonstrated in `pairing.test.ts`). Pair only over a channel an attacker cannot rewrite. A real SAS needs an interactive commitment exchange, which the one-way QR/JSON flow has no room for — tracked for v0.2 alongside `p2panda-auth`.
+- **The 6-digit pairing SAS is a transfer checksum, not authentication.** It catches a mistyped, truncated, or wrong-device code. It does *not* stop an attacker who can rewrite the pairing channel: the digits are only 10^6 wide over inputs the payload's author chooses, so a forged payload can be ground offline in well under a second to display the same digits the genuine device shows (demonstrated in `pairing.test.ts`). Pair only over a channel an attacker cannot rewrite. A real SAS needs an interactive commitment exchange, which the one-way QR/JSON flow has no room for — and per [ADR-011](docs/adr/011-adopt-p2panda-direction.md) a homegrown fix is deliberately **not** planned: this hole closes with `p2panda-auth` adoption, not with our own protocol.
 - The shared space key has no revocation or forward secrecy: anyone who ever had it can decrypt history. Don't treat pairing as reversible.
 - **Breaking change from pre-v0.1 builds:** protocol v3 (ADR-010) does not read old `app_sync` graph data. A device upgrading from a pre-v0.1 build republishes its local notes as a fresh op-log genesis on first boot; this converges across devices via the normal merge path but is not a byte-for-byte migration of prior sync history.
 - Real WebLLM downloads are not run in CI; e2e uses injected mocks.

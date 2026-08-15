@@ -4,15 +4,27 @@ Open work after v0.1.0. Ordered by priority within each section. Items carry
 enough context to be picked up cold — the reasoning behind most of them lives
 in [ADR-010](adr/010-per-device-op-log.md) and the v0.1.0 CHANGELOG entry.
 
-The v0.2 direction is unchanged: replace homegrown pieces with
-[p2panda](https://p2panda.org/) crates once a stable browser binding exists.
-The module→crate mapping table is in ADR-010.
+Since [ADR-011](adr/011-adopt-p2panda-direction.md) the v0.2 direction is
+*active*: the project steers toward [p2panda](https://p2panda.org/) along the
+thin-client + broker path, and every item here carries one of three labels:
+
+- **`[frozen — p2panda]`** — do **not** build this. The designated fix is a
+  p2panda crate; a homegrown version would be thrown away at migration.
+  Frozen items stay listed (and their security caveats stay documented)
+  because the holes are real until the replacement lands.
+- **`[ours]`** — stays actionable regardless of the migration; either it
+  survives the swap or it protects users on the bridge stack today.
+- **`[new — audit 2026-08]`** — found in the August 2026 sync-stack audit;
+  first in the queue for code work.
+
+The gap list for the upstream conversation is
+[p2panda-gaps.md](p2panda-gaps.md).
 
 ---
 
 ## Security — known holes
 
-### 1. The pairing SAS authenticates nothing
+### 1. `[frozen — p2panda]` The pairing SAS authenticates nothing
 
 `shared/identity/pairing.ts#deriveSasDigits`
 
@@ -36,13 +48,13 @@ adoption.
 Until then: the pairing channel itself is the trust boundary. Documented in
 the README caveats and ADR-006.
 
-### 2. No device revocation or key rotation
+### 2. `[frozen — p2panda]` No device revocation or key rotation
 
 Anyone holding the space key has full read/write forever; removing a device
 from a space is not implemented. The Settings device roster shows who has
 synced but cannot evict. Maps to `p2panda-auth`.
 
-### 3. No forward secrecy / post-compromise security
+### 3. `[frozen — p2panda]` No forward secrecy / post-compromise security
 
 One shared AES-256 space key, so anyone who ever held it can decrypt all
 history. Maps to `p2panda-encryption` / `p2panda-spaces`.
@@ -51,7 +63,7 @@ history. Maps to `p2panda-encryption` / `p2panda-spaces`.
 
 ## Correctness / robustness
 
-### 4. Acks are session state only
+### 4. `[ours]` Acks are session state only
 
 `shared/sync/engine.ts` — `acksByDevice` lives in memory and is rebuilt from
 Gun subscriptions on every boot. The GC coverage gate compensates by treating
@@ -68,7 +80,7 @@ The *gate* itself is now covered against real acks across three devices
 (`gc-coverage.integration.test.ts`), so a regression in coverage logic fails
 fast. Persisting acks across reloads remains open.
 
-### 5. Corrupt device key silently mints a new identity
+### 5. `[ours]` Corrupt device key silently mints a new identity
 
 `shared/identity/device.ts#loadDeviceKey` returns `null` on unparseable
 storage, so `ensureDeviceKey` generates a fresh keypair. The old log is never
@@ -78,14 +90,14 @@ entry that can never be removed.
 
 Decide: surface it to the user, or accept and document it. Currently neither.
 
-### 6. `pending` delete ops are rescanned forever
+### 6. `[ours]` `pending` delete ops are rescanned forever
 
 `shared/store/materialize.ts` — a `delete` op whose target note has never been
 seen stays unapplied and is re-planned on every cycle. Harmless (the plan is
 pure and cheap, nothing blocks behind it) but unbounded if the creating
 device never shows up. Consider aging them into quarantine after N cycles.
 
-### 7. No way to release a quarantined op
+### 7. `[ours]` No way to release a quarantined op
 
 Quarantine is permanent — nothing un-quarantines. The Settings conflict
 history lists the entries but offers no retry. After a bug fix that makes a
@@ -93,7 +105,7 @@ previously-undecodable payload readable, those ops stay dead. A "retry
 quarantined" action would need to clear the flag and let the materializer
 re-plan.
 
-### 8. Version stamping in `opFromWireRow`
+### 8. `[ours]` Version stamping in `opFromWireRow`
 
 `shared/sync/protocol.ts` stamps `OPLOG_VERSION` rather than carrying
 `row.v`. Safe only while `SUPPORTED_MIN_V === SUPPORTED_MAX_V === 3` — the
@@ -101,7 +113,7 @@ version is inside the signed, hashed header, so widening the supported range
 without fixing this makes every non-current row fail hash verification at
 ingest. Commented in place; must be handled with the next protocol bump.
 
-### 9. Entity-agnosticism is one step short
+### 9. `[ours]` Entity-agnosticism is one step short
 
 The wire protocol, payload registry, and store are entity-parameterized, but
 `client.ts` hydrates and materializes only `"notes"`
@@ -110,7 +122,7 @@ needs a materializer registry and a hydrate list, not a protocol change. Worth
 doing when a second entity actually exists — that is the test of whether the
 generalization holds.
 
-### 10. Gun `.once()` range-fetch reliability
+### 10. `[ours]` Gun `.once()` range-fetch reliability
 
 `gun-log-transport.ts#fetchOps` reads rows one seq at a time with a timeout.
 Never soak-tested against a loaded relay; the engine's gap retry covers
@@ -118,7 +130,7 @@ transient misses, but the per-row round trip is also the main sync latency
 cost. Wants a soak test against `server/gun-peer` under load, and possibly a
 batched read.
 
-### 11. Crash between append and publish
+### 11. `[ours]` Crash between append and publish
 
 ~~The log doubles as the outbox (`published` flag), which replaced the
 offline-transactions retry path for network failures. A crash between the
@@ -131,16 +143,44 @@ the op still ships and lands on a peer.
 
 ---
 
+## New — audit 2026-08
+
+### 20. `[new — audit 2026-08]` A wire row that fails to decrypt stalls that log silently
+
+`gun-log-transport.ts#fetchOps` skips a row it cannot decrypt or parse
+(`continue`), and the engine reads the resulting hole as "relay hasn't
+propagated yet" — so it refetches the same range every cycle (30 s interval)
+forever. Only a protocol-version mismatch surfaces a status (`outdated`);
+a decrypt failure surfaces **nothing**. One corrupt or tampered row on the
+relay means the authoring device's log above that seq never ingests, with no
+UI signal and a permanent retry loop. Quarantine covers bad *payloads after
+ingest*, not bad *rows before ingest*.
+
+Fix shape: count consecutive failed decrypts per `(device, seq)`, surface
+`degraded` with a reason after N failures, and back off the retry instead of
+hammering every cycle. This protects users on the bridge stack, so it is
+worth doing despite the migration direction.
+
+### 21. `[new — audit 2026-08]` `markPublished` / `markApplied` write one row per round trip
+
+`oplog-store.ts` — both loop `await persistence.patchOp(hash, …)` per hash.
+After a large flush (first sync of a long log, pairing republish) that is
+N sequential storage round trips where one batched write would do. Add a
+`patchOps(hashes, patch)` batch to the `OpLogPersistence` port (contract
+suite covers both implementations).
+
+---
+
 ## Performance
 
-### 12. O(n) scans in the op-log read index
+### 12. `[frozen — p2panda]` O(n) scans in the op-log read index
 
 `shared/store/oplog-store.ts` — `opAtIndexed`, `maxOwnSeqIndexed`, and
 `query()` all walk every op in the index. Fine at v0.1 scale, linear in
 lifetime edit count. Add secondary maps (`(entity,device,seq) → hash`,
 per-flag sets) when the log gets large enough to matter.
 
-### 13. No log compaction
+### 13. `[frozen — p2panda]` No log compaction
 
 Full-state `upsert` payloads mean log size grows with edit count, not content
 size. No pruning ships in v0.1. Two directions, both v0.2: Loro delta payloads
@@ -154,26 +194,26 @@ a burst of keystrokes is one op, not twenty.
 
 ## Tooling / CI
 
-### 14. Coverage is collected but not enforced
+### 14. `[ours]` Coverage is collected but not enforced
 
 `vitest.config.ts` reports `text-summary` + `json-summary` and CI prints it to
 the job summary, but there are no thresholds. Pick a floor and fail under it,
 otherwise coverage only ever ratchets down.
 
-### 15. Thin component test coverage
+### 15. `[ours]` Thin component test coverage
 
 Three `.tsx` test files (InstallAppButton, AppErrorBoundary, PairingSection
 error path). The jsdom project exists and works — the extracted Settings
 sections and AI panels are now easy to test and untested.
 
-### 16. Missing CI gates
+### 16. `[ours]` Missing CI gates
 
 - No Lighthouse/PWA assertion, despite manifest correctness being a headline
   feature.
 - No bundle-size budget (the main chunk already warns at >500 kB).
 - No dependency audit.
 
-### 17. Remove `workbox-window`
+### 17. `[ours]` Remove `workbox-window`
 
 Listed in `devDependencies`, imported nowhere (`virtual:pwa-register` is what
 the app actually uses).
@@ -182,12 +222,12 @@ the app actually uses).
 
 ## Platform
 
-### 18. Chromium only
+### 18. `[ours]` Chromium only
 
 OPFS requirement. Safari/WebKit out of scope for v0.1. Revisit when OPFS
 support is broad enough, or if a native shell becomes the answer.
 
-### 19. `@tanstack/browser-db-sqlite-persistence` is pre-1.0
+### 19. `[ours]` `@tanstack/browser-db-sqlite-persistence` is pre-1.0
 
 Kept behind `PersistenceFacade` and the `OpLogPersistence` port so it stays
 swappable. Its async write-confirmation behavior is the reason `OpLogStore`
